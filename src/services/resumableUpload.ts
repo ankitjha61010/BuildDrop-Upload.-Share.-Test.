@@ -111,6 +111,7 @@ export class ResumableUploader {
       let chunkUploaded = false;
       let retries = 0;
       const maxRetries = 5;
+      const isFinalChunk = chunkEnd === this.file.size;
 
       while (!chunkUploaded && retries < maxRetries) {
         if (this.isCancelled || this.isPaused) break;
@@ -124,44 +125,33 @@ export class ResumableUploader {
             chunkUploaded = true;
           } else if (result.status === 200 || result.status === 201) {
             // Completed!
-            const fileData = JSON.parse(result.response);
-            this.currentByte = this.file.size;
-            this.notifyProgress('completed', 100, this.file.size, 0, 0, undefined, fileData.id);
-
-            // Set public sharing link permission (server-side, using the owner's own credentials)
-            // so the recipient can watch/download without signing in themselves.
-            await fetchJson(
-              '/api/finalize-upload',
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileId: fileData.id }),
-              },
-              'Making the upload shareable'
-            );
-
-            const videoMeta: VideoMetadata = {
-              id: fileData.id,
-              driveFileId: fileData.id,
-              name: fileData.name,
-              originalFileName: this.file.name,
-              size: this.file.size,
-              mimeType: fileData.mimeType,
-              createdAt: parseInt(fileData.properties?.vidsetu_created_at || fileData.appProperties?.vidsetu_created_at || Date.now().toString(), 10),
-              expiresAt: parseInt(fileData.properties?.vidsetu_expires_at || fileData.appProperties?.vidsetu_expires_at || (Date.now() + EXPIRATION_DURATION_MS).toString(), 10),
-              isExpired: false,
-              thumbnailLink: fileData.thumbnailLink,
-              webContentLink: fileData.webContentLink,
-              webViewLink: fileData.webViewLink,
-              driveFolderId: fileData.parents?.[0],
-            };
-
-            driveApi.cacheVideoMetadata(videoMeta);
-            return videoMeta;
+            return await this.completeUpload(JSON.parse(result.response));
           } else {
             throw new Error(`Unexpected server response during chunk upload: HTTP ${result.status}`);
           }
         } catch (err: any) {
+          // Drive's resumable upload endpoint has a known quirk: the final PUT that completes
+          // the file (200/201 with the file resource) sometimes comes back without CORS headers,
+          // even though the earlier 308 responses for the same session had them - the browser
+          // reports this as a plain network error even though Drive already has the whole file.
+          // Confirm completion through our own server instead, which isn't subject to CORS.
+          if (isFinalChunk) {
+            try {
+              const fileData = await fetchJson<any>(
+                '/api/complete-upload',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ uploadUrl: this.uploadUrl, fileSize: this.file.size }),
+                },
+                'Confirming the upload'
+              );
+              return await this.completeUpload(fileData);
+            } catch {
+              // Not confirmed complete yet - fall through to the normal retry/backoff below.
+            }
+          }
+
           retries++;
           if (retries >= maxRetries) {
             this.notifyProgress('failed', this.calculatePercent(), this.currentByte, 0, 0, err.message);
@@ -176,6 +166,44 @@ export class ResumableUploader {
     }
 
     throw new Error('Upload loop completed without receiving final Google Drive file record.');
+  }
+
+  // Shared by both the happy path (browser reads the 200/201 response directly) and the
+  // CORS-recovery path (server confirms completion on the browser's behalf) - see uploadNextChunks.
+  private async completeUpload(fileData: any): Promise<VideoMetadata> {
+    this.currentByte = this.file.size;
+    this.notifyProgress('completed', 100, this.file.size, 0, 0, undefined, fileData.id);
+
+    // Set public sharing link permission (server-side, using the owner's own credentials)
+    // so the recipient can watch/download without signing in themselves.
+    await fetchJson(
+      '/api/finalize-upload',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: fileData.id }),
+      },
+      'Making the upload shareable'
+    );
+
+    const videoMeta: VideoMetadata = {
+      id: fileData.id,
+      driveFileId: fileData.id,
+      name: fileData.name,
+      originalFileName: this.file.name,
+      size: this.file.size,
+      mimeType: fileData.mimeType,
+      createdAt: parseInt(fileData.properties?.vidsetu_created_at || fileData.appProperties?.vidsetu_created_at || Date.now().toString(), 10),
+      expiresAt: parseInt(fileData.properties?.vidsetu_expires_at || fileData.appProperties?.vidsetu_expires_at || (Date.now() + EXPIRATION_DURATION_MS).toString(), 10),
+      isExpired: false,
+      thumbnailLink: fileData.thumbnailLink,
+      webContentLink: fileData.webContentLink,
+      webViewLink: fileData.webViewLink,
+      driveFolderId: fileData.parents?.[0],
+    };
+
+    driveApi.cacheVideoMetadata(videoMeta);
+    return videoMeta;
   }
 
   private sendChunkWithXHR(
