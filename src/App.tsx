@@ -1,11 +1,10 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { ToastProvider } from './context/ToastContext';
 import { ToastContainer } from './components/common/Toast';
 import { Header } from './components/layout/Header';
 import { MobileNavigation } from './components/layout/MobileNavigation';
 import { HomePage } from './pages/HomePage';
-import { UploadPage } from './pages/UploadPage';
 import { WatchPage } from './pages/WatchPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -24,7 +23,7 @@ export const App: React.FC = () => {
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24 md:pb-8">
             <Routes>
               <Route path="/" element={<HomePage />} />
-              <Route path="/upload" element={<UploadPage />} />
+              <Route path="/upload" element={<Navigate to="/#uploader" replace />} />
               <Route path="/watch/:videoId" element={<WatchPage />} />
               <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
               <Route path="/terms" element={<TermsPage />} />

@@ -7,7 +7,7 @@ export const MobileNavigation: React.FC = () => {
 
   const navItems = [
     { name: 'Home', path: '/', icon: Home },
-    { name: 'Upload', path: '/upload', icon: UploadCloud, highlight: true },
+    { name: 'Upload', path: '/#uploader', icon: UploadCloud, highlight: true },
   ];
 
   return (

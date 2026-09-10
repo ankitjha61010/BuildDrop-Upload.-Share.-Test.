@@ -204,7 +204,7 @@ export const VideoUploader: React.FC = () => {
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`glass-panel p-10 sm:p-14 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${
+              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${
                 dragActive
                   ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]'
                   : 'border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/40'
@@ -217,14 +217,14 @@ export const VideoUploader: React.FC = () => {
                 className="hidden"
               />
 
-              <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto mb-6 text-indigo-400 group-hover:scale-110 group-hover:bg-indigo-500/20 transition-all duration-300">
-                <UploadCloud className="w-10 h-10" />
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto mb-3 text-indigo-400 group-hover:scale-110 group-hover:bg-indigo-500/20 transition-all duration-300">
+                <UploadCloud className="w-7 h-7" />
               </div>
 
-              <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">
+              <h3 className="text-lg sm:text-xl font-bold text-white mb-1.5">
                 Drag and drop any file here
               </h3>
-              <p className="text-sm text-slate-400 mb-6 max-w-md mx-auto">
+              <p className="text-xs sm:text-sm text-slate-400 mb-4 max-w-md mx-auto">
                 Or click to browse from desktop or select files (APK, ZIP, videos, etc.) on mobile devices.
               </p>
 
