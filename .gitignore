@@ -28,5 +28,8 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Google Cloud OAuth client secret files downloaded from the Cloud Console
+client_secret_*.json
+
 # Local Netlify folder
 .netlify

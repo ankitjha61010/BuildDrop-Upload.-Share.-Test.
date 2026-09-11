@@ -111,9 +111,9 @@ export const WatchPage: React.FC = () => {
   const visitorIsIOS = isIOS();
   const manifestUrl = `${window.location.origin}/api/ipa-manifest?id=${encodeURIComponent(video.driveFileId)}`;
   // A plain navigation, not routed through handleDownloadFile - iOS fetches the manifest and the
-  // .ipa itself entirely on-device after this, invisible to our JS, so there's no reliable moment
-  // to fire the one-time-link "consume" call without risking deleting the file out from under a
-  // still-in-progress OS-driven install.
+  // .ipa itself entirely on-device after this, invisible to our JS. The one-time-link "consume"
+  // call for this path fires server-side instead, from inside download-file.ts (see ipa-manifest.ts
+  // and netlify/edge-functions/download-file.ts) once iOS actually fetches the .ipa bytes.
   const itmsInstallUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
 
   // File type icon selector - covers video/image/audio/apk-aab-ipa/archive/document/other

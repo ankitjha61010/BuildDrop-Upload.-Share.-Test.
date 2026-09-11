@@ -13,10 +13,15 @@ import { getDriveAccessToken } from '../lib/googleDriveAuth.ts';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
-export default async (request: Request, _context: Context) => {
+export default async (request: Request, context: Context) => {
   const url = new URL(request.url);
   const fileId = url.searchParams.get('id');
   const requestedName = url.searchParams.get('name') || 'download';
+  // Set only by ipa-manifest.ts's software-package url - for an iOS OTA install, iOS's installd
+  // process fetches the .ipa straight from this endpoint, invisibly to our own JS, so this is the
+  // only reliable place to consume a one-time-link install the way handleDownloadFile does for a
+  // manual browser download.
+  const shouldConsumeAfterServing = url.searchParams.get('consume') === '1';
 
   if (!fileId) {
     return new Response('Missing id', { status: 400 });
@@ -39,6 +44,20 @@ export default async (request: Request, _context: Context) => {
     const detail = await driveRes.text().catch(() => '');
     console.error('Drive media fetch failed:', driveRes.status, detail);
     return new Response('Failed to fetch file from Drive', { status: driveRes.status === 404 ? 404 : 502 });
+  }
+
+  // Fired once Drive has confirmed the file exists and started streaming to us - in the
+  // background (via waitUntil) so it never delays the response itself. consume-download.ts
+  // independently re-verifies this is actually a temporary one-time share before deleting
+  // anything, so a forged/stale "consume=1" can't be used to wipe a permanent library file.
+  if (shouldConsumeAfterServing) {
+    context.waitUntil(
+      fetch(new URL('/api/consume-download', request.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+      }).catch(() => {})
+    );
   }
 
   const asciiName = requestedName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
