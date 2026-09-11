@@ -11,7 +11,8 @@ import { ErrorState } from '../components/common/ErrorState';
 import { CopyLinkButton } from '../components/common/CopyLinkButton';
 import { QRModal } from '../components/common/QRModal';
 import { VideoMetadata } from '../types';
-import { formatFileSize, getFileTypeMeta, isVideoFile as isVideoFileType } from '../utils/fileType';
+import { formatFileSize, getFileTypeMeta, isVideoFile as isVideoFileType, isIpaFile, isAndroidPackageFile } from '../utils/fileType';
+import { isIOS } from '../utils/platform';
 import { TransferSpeedTracker, formatSpeed, formatEta } from '../utils/transferSpeed';
 import {
   Calendar,
@@ -20,6 +21,8 @@ import {
   ArrowLeft,
   Download,
   Loader2,
+  Smartphone,
+  Info,
 } from 'lucide-react';
 
 export const WatchPage: React.FC = () => {
@@ -101,6 +104,17 @@ export const WatchPage: React.FC = () => {
   // Helper to determine if file is a playable video format
   const fileName = video.originalFileName || video.name || '';
   const isVideoFile = isVideoFileType(fileName, video.mimeType);
+
+  // iOS OTA install (.ipa only - .apk/.aab can never install on iOS, different OS entirely)
+  const fileIsIpa = isIpaFile(fileName);
+  const fileIsAndroidPackage = isAndroidPackageFile(fileName);
+  const visitorIsIOS = isIOS();
+  const manifestUrl = `${window.location.origin}/api/ipa-manifest?id=${encodeURIComponent(video.driveFileId)}`;
+  // A plain navigation, not routed through handleDownloadFile - iOS fetches the manifest and the
+  // .ipa itself entirely on-device after this, invisible to our JS, so there's no reliable moment
+  // to fire the one-time-link "consume" call without risking deleting the file out from under a
+  // still-in-progress OS-driven install.
+  const itmsInstallUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
 
   // File type icon selector - covers video/image/audio/apk-aab-ipa/archive/document/other
   const renderFileIcon = () => {
@@ -211,6 +225,30 @@ export const WatchPage: React.FC = () => {
           </div>
 
           <div className="flex flex-col items-center gap-3">
+            {fileIsIpa && visitorIsIOS && (
+              <a
+                href={itmsInstallUrl}
+                className="inline-flex items-center gap-2.5 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm sm:text-base shadow-xl shadow-emerald-600/40 hover:shadow-emerald-500/60 hover:scale-[1.02] transition-all"
+              >
+                <Smartphone className="w-5 h-5" />
+                <span>Install on this iPhone/iPad</span>
+              </a>
+            )}
+
+            {fileIsIpa && !visitorIsIOS && (
+              <div className="max-w-sm text-xs sm:text-sm text-slate-400 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-3 flex items-start gap-2 text-left">
+                <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <span>This is an iOS app build. Open this link on an iPhone or iPad in Safari to install it directly.</span>
+              </div>
+            )}
+
+            {fileIsAndroidPackage && visitorIsIOS && (
+              <div className="max-w-sm text-xs sm:text-sm text-slate-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-start gap-2 text-left">
+                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>This is an Android app build (.apk) and can't be installed on an iPhone or iPad. You can still download the raw file below.</span>
+              </div>
+            )}
+
             <button
               onClick={handleDownloadFile}
               disabled={isDownloading}
@@ -228,7 +266,11 @@ export const WatchPage: React.FC = () => {
               ) : (
                 <>
                   <Download className="w-5 h-5" />
-                  <span>Download File ({formatFileSize(video.size)})</span>
+                  <span>
+                    {fileIsIpa && visitorIsIOS
+                      ? `Download .ipa File (${formatFileSize(video.size)})`
+                      : `Download File (${formatFileSize(video.size)})`}
+                  </span>
                 </>
               )}
             </button>

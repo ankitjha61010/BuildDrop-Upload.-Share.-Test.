@@ -186,6 +186,17 @@ export class ResumableUploader {
       'Making the upload shareable'
     );
 
+    // Best-effort iOS OTA metadata extraction (bundle id/version/app name) for .ipa uploads -
+    // fire-and-forget so a slow or failed extraction never blocks the upload from completing.
+    // /api/ipa-manifest falls back to placeholder metadata if this hasn't finished yet.
+    if (/\.ipa$/i.test(this.file.name)) {
+      fetch('/api/extract-ipa-metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: fileData.id }),
+      }).catch(() => {});
+    }
+
     const videoMeta: VideoMetadata = {
       id: fileData.id,
       driveFileId: fileData.id,

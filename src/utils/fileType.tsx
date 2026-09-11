@@ -16,6 +16,8 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i;
 const AUDIO_EXT = /\.(mp3|wav|flac|aac|ogg|m4a|wma)$/i;
 // APK/AAB are Android app packages, IPA is the iOS equivalent - grouped together as "app package"
 const APK_EXT = /\.(apk|aab|ipa)$/i;
+const IPA_ONLY_EXT = /\.ipa$/i;
+const ANDROID_PACKAGE_EXT = /\.(apk|aab)$/i;
 const ARCHIVE_EXT = /\.(zip|rar|7z|tar|gz|bz2)$/i;
 const DOCUMENT_EXT = /\.(pdf|docx?|xlsx?|pptx?|txt|csv|rtf)$/i;
 
@@ -46,6 +48,17 @@ export function isVideoFile(fileName: string, mimeType?: string): boolean {
 
 export function isImageFile(fileName: string, mimeType?: string): boolean {
   return getFileCategory(fileName, mimeType) === 'image';
+}
+
+// Split out from the broader "apk" category above for install-flow branching - a .ipa needs iOS's
+// itms-services OTA install, while a .apk/.aab is an Android-only package that can never install
+// on iOS at all, no matter what UI is built around it.
+export function isIpaFile(fileName: string): boolean {
+  return IPA_ONLY_EXT.test((fileName || '').toLowerCase().trim());
+}
+
+export function isAndroidPackageFile(fileName: string): boolean {
+  return ANDROID_PACKAGE_EXT.test((fileName || '').toLowerCase().trim());
 }
 
 interface CategoryMeta {
