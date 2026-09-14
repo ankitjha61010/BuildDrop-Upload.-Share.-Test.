@@ -288,7 +288,12 @@ export const WatchPage: React.FC = () => {
                   </a>
                 ) : (
                   <button
-                    onClick={handleDownloadFile}
+                    onClick={() => {
+                      if (fileIsIpa) {
+                        showToast('iOS Device Required', 'Over-The-Air (OTA) installation requires Safari on an iPhone/iPad. Downloading .ipa file instead.', 'info', 5000);
+                      }
+                      handleDownloadFile();
+                    }}
                     disabled={isDownloading}
                     className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer disabled:opacity-60"
                   >
@@ -300,7 +305,7 @@ export const WatchPage: React.FC = () => {
                     ) : (
                       <>
                         <Smartphone className="w-5 h-5" />
-                        <span>Install on Device</span>
+                        <span>{fileIsIpa ? 'Download .ipa Build' : 'Install / Download Build'}</span>
                       </>
                     )}
                   </button>
