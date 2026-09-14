@@ -50,9 +50,63 @@ export default async (req: Request) => {
 
   const props = { ...file.appProperties, ...file.properties };
   const originalName: string = props.original_name || file.name || 'app.ipa';
-  const bundleId = props.builddrop_bundle_id || `com.builddrop.${fileId.slice(0, 12).toLowerCase()}`;
-  const bundleVersion = props.builddrop_bundle_version || '1.0';
-  const title = props.builddrop_app_name || originalName.replace(/\.ipa$/i, '');
+  
+  let bundleId = props.builddrop_bundle_id;
+  let bundleVersion = props.builddrop_bundle_version;
+  let title = props.builddrop_app_name || originalName.replace(/\.ipa$/i, '');
+
+  // iOS OTA installs fail if manifest bundle-identifier does not match Info.plist.
+  // Dynamically extract real bundleId from .ipa if missing or placeholder.
+  if (!bundleId || bundleId.startsWith('com.builddrop.')) {
+    try {
+      const AppInfoParser = (await import('app-info-parser')).default;
+      const { createWriteStream } = await import('fs');
+      const { unlink } = await import('fs/promises');
+      const { pipeline } = await import('stream/promises');
+      const { Readable } = await import('stream');
+      const { tmpdir } = await import('os');
+      const { join } = await import('path');
+
+      const tmpPath = join(tmpdir(), `ipa-manifest-${fileId}-${Date.now()}.ipa`);
+      const fileRes = await fetch(
+        `${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (fileRes.ok && fileRes.body) {
+        await pipeline(Readable.fromWeb(fileRes.body as any), createWriteStream(tmpPath));
+        const parser = new AppInfoParser(tmpPath);
+        const result: any = await parser.parse();
+
+        if (result?.CFBundleIdentifier) {
+          bundleId = result.CFBundleIdentifier;
+          if (result.CFBundleShortVersionString || result.CFBundleVersion) {
+            bundleVersion = result.CFBundleShortVersionString || result.CFBundleVersion;
+          }
+          if (result.CFBundleDisplayName || result.CFBundleName) {
+            title = result.CFBundleDisplayName || result.CFBundleName;
+          }
+
+          // Save extracted properties back to Drive asynchronously
+          const propertiesToSave: Record<string, string> = { builddrop_bundle_id: bundleId.slice(0, 100) };
+          if (bundleVersion) propertiesToSave.builddrop_bundle_version = bundleVersion.slice(0, 50);
+          if (title) propertiesToSave.builddrop_app_name = title.slice(0, 100);
+
+          fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ properties: propertiesToSave }),
+          }).catch(() => {});
+        }
+        await unlink(tmpPath).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Dynamic bundleId extraction in ipa-manifest warning:', err);
+    }
+  }
+
+  bundleId = bundleId || `com.builddrop.${fileId.slice(0, 12).toLowerCase()}`;
+  bundleVersion = bundleVersion || '1.0.0';
 
   const isTemporaryShare = Boolean(props.vidsetu_expires_at);
   const downloadParams = new URLSearchParams({ id: fileId, name: originalName });

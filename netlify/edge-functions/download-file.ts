@@ -14,86 +14,91 @@ import { getDriveAccessToken } from '../lib/googleDriveAuth.ts';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
 export default async (request: Request, context: Context) => {
-  const url = new URL(request.url);
-  const fileId = url.searchParams.get('id');
-  const requestedName = url.searchParams.get('name') || 'download';
-
-  if (!fileId) {
-    return new Response('Missing id', { status: 400 });
-  }
-
-  let token: string;
   try {
-    token = await getDriveAccessToken();
-  } catch (err) {
-    console.error('Failed to mint Drive access token:', err);
-    return new Response('Server not configured', { status: 500 });
+    const url = new URL(request.url);
+    const fileId = url.searchParams.get('id');
+    const requestedName = url.searchParams.get('name') || 'download';
+
+    if (!fileId) {
+      return new Response('Missing id', { status: 400 });
+    }
+
+    let token: string;
+    try {
+      token = await getDriveAccessToken();
+    } catch (err) {
+      console.error('Failed to mint Drive access token:', err);
+      return new Response('Server not configured', { status: 500 });
+    }
+
+    const driveHeaders: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+    };
+
+    // Forward Range header for iOS OTA installs (.ipa) and resumable/segmented media downloads
+    const clientRange = request.headers.get('Range');
+    if (clientRange) {
+      driveHeaders['Range'] = clientRange;
+    }
+
+    const driveRes = await fetch(
+      `${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+      { headers: driveHeaders }
+    );
+
+    if (!driveRes.ok || !driveRes.body) {
+      const detail = await driveRes.text().catch(() => '');
+      console.error('Drive media fetch failed:', driveRes.status, detail);
+      return new Response('Failed to fetch file from Drive', { status: driveRes.status === 404 ? 404 : 502 });
+    }
+
+    const length = driveRes.headers.get('Content-Length');
+    const shouldConsumeOnComplete = url.searchParams.get('consume') === '1';
+    let responseBody: ReadableStream = driveRes.body;
+
+    if (shouldConsumeOnComplete) {
+      let transferredBytes = 0;
+      const expectedLength = parseInt(length || '0', 10);
+      const transformStream = new TransformStream({
+        transform(chunk, controller) {
+          transferredBytes += chunk.byteLength || chunk.length || 0;
+          controller.enqueue(chunk);
+        },
+        flush() {
+          if (!expectedLength || transferredBytes >= expectedLength) {
+            context.waitUntil(
+              fetch(new URL('/api/consume-download', request.url), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileId }),
+              }).catch(() => {})
+            );
+          }
+        },
+      });
+      responseBody = driveRes.body.pipeThrough(transformStream);
+    }
+
+    const asciiName = requestedName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+    const headers = new Headers();
+    headers.set('Content-Type', driveRes.headers.get('Content-Type') || 'application/octet-stream');
+    
+    if (length) headers.set('Content-Length', length);
+
+    const contentRange = driveRes.headers.get('Content-Range');
+    if (contentRange) headers.set('Content-Range', contentRange);
+
+    const acceptRanges = driveRes.headers.get('Accept-Ranges');
+    if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
+
+    headers.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(requestedName)}`);
+    headers.set('Cache-Control', 'no-store');
+
+    return new Response(responseBody, { status: driveRes.status, headers });
+  } catch (err: any) {
+    console.error('Edge function download-file exception:', err);
+    return new Response(err?.message || 'Internal Edge Function Error', { status: 500 });
   }
-
-  const driveHeaders: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-  };
-
-  // Forward Range header for iOS OTA installs (.ipa) and resumable/segmented media downloads
-  const clientRange = request.headers.get('Range');
-  if (clientRange) {
-    driveHeaders['Range'] = clientRange;
-  }
-
-  const driveRes = await fetch(
-    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
-    { headers: driveHeaders }
-  );
-
-  if (!driveRes.ok || !driveRes.body) {
-    const detail = await driveRes.text().catch(() => '');
-    console.error('Drive media fetch failed:', driveRes.status, detail);
-    return new Response('Failed to fetch file from Drive', { status: driveRes.status === 404 ? 404 : 502 });
-  }
-
-  const shouldConsumeOnComplete = url.searchParams.get('consume') === '1';
-  let responseBody: ReadableStream = driveRes.body;
-
-  if (shouldConsumeOnComplete) {
-    let transferredBytes = 0;
-    const expectedLength = parseInt(length || '0', 10);
-    const transformStream = new TransformStream({
-      transform(chunk, controller) {
-        transferredBytes += chunk.byteLength || chunk.length || 0;
-        controller.enqueue(chunk);
-      },
-      flush() {
-        // Stream completed 100% successfully without error!
-        if (!expectedLength || transferredBytes >= expectedLength) {
-          context.waitUntil(
-            fetch(new URL('/api/consume-download', request.url), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileId }),
-            }).catch(() => {})
-          );
-        }
-      },
-    });
-    responseBody = driveRes.body.pipeThrough(transformStream);
-  }
-
-  const asciiName = requestedName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
-  const headers = new Headers();
-  headers.set('Content-Type', driveRes.headers.get('Content-Type') || 'application/octet-stream');
-  
-  if (length) headers.set('Content-Length', length);
-
-  const contentRange = driveRes.headers.get('Content-Range');
-  if (contentRange) headers.set('Content-Range', contentRange);
-
-  const acceptRanges = driveRes.headers.get('Accept-Ranges');
-  if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
-
-  headers.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(requestedName)}`);
-  headers.set('Cache-Control', 'no-store');
-
-  return new Response(responseBody, { status: driveRes.status, headers });
 };
 
 export const config: Config = {

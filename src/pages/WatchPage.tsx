@@ -289,6 +289,15 @@ export const WatchPage: React.FC = () => {
                 </div>
 
                 {/* Info prompts for platform compatibility */}
+                {fileIsIpa && visitorIsIOS && (
+                  <div className="text-[11px] sm:text-xs text-slate-300 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 flex items-start gap-2 text-left">
+                    <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>iOS Installation Notice:</strong> After tapping Install, return to home screen. If iOS shows "Unable to Verify", go to <strong>Settings → General → VPN & Device Management</strong> and tap <strong>Trust Certificate</strong>.
+                    </span>
+                  </div>
+                )}
+
                 {fileIsIpa && !visitorIsIOS && (
                   <div className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/60 rounded-xl p-3 flex items-start gap-2 text-left">
                     <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
