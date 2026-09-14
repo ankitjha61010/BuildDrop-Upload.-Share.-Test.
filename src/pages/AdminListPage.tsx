@@ -539,6 +539,7 @@ export const AdminListPage: React.FC = () => {
 
             <VideoUploader
               targetFolder="Private_BuildDrop_Uploads"
+              showTargetFolderDropdown={true}
               onUploadComplete={() => {
                 fetchFiles();
               }}

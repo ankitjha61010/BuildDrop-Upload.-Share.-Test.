@@ -23,10 +23,11 @@ import {
 
 interface VideoUploaderProps {
   targetFolder?: string;
+  showTargetFolderDropdown?: boolean;
   onUploadComplete?: (video: VideoMetadata) => void;
 }
 
-export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUploadComplete }) => {
+export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, showTargetFolderDropdown, onUploadComplete }) => {
   const { showToast } = useToast();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -43,13 +44,24 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUp
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadRecentUploads = () => {
+  const loadRecentUploads = async () => {
     const cache = driveApi.getLocalMetadataCache();
     const list = Object.values(cache)
       .filter((item): item is VideoMetadata => Boolean(item && item.id && item.name))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       .slice(0, 3);
     setRecentUploads(list);
+
+    // Verify recent builds against Drive metadata and purge any non-existent/deleted files from cache
+    for (const item of list) {
+      try {
+        const res = await fetch(`/api/get-metadata?id=${encodeURIComponent(item.id)}`);
+        if (res.status === 404) {
+          driveApi.removeCachedMetadata(item.id);
+          setRecentUploads((prev) => prev.filter((i) => i.id !== item.id));
+        }
+      } catch {}
+    }
   };
 
   useEffect(() => {
@@ -62,11 +74,21 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUp
     }
     try {
       await driveApi.consumeTemporaryDownload(fileId);
-      showToast('Build Deleted', `"${fileName}" has been deleted.`, 'info');
+      driveApi.removeCachedMetadata(fileId);
+      showToast('Build Deleted', `"${fileName}" has been deleted from cloud storage and cache.`, 'info');
       loadRecentUploads();
     } catch (err: any) {
-      showToast('Delete Error', err.message || 'Failed to delete build.', 'error');
+      driveApi.removeCachedMetadata(fileId);
+      showToast('Build Removed', `"${fileName}" removed from list.`, 'info');
+      loadRecentUploads();
     }
+  };
+
+  const handleClearAllHistory = () => {
+    const cache = driveApi.getLocalMetadataCache();
+    Object.keys(cache).forEach((id) => driveApi.removeCachedMetadata(id));
+    setRecentUploads([]);
+    showToast('Cache Cleared', 'All local recent uploads history cleared.', 'info');
   };
 
   const handleCopyRecentLink = (fileId: string) => {
@@ -296,21 +318,23 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUp
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      {/* Target Folder Selector Dropdown */}
-      <div className="glass-panel p-3 px-4 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-900/60">
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
-          <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
-          <span>Upload Target Folder:</span>
+      {/* Target Folder Selector Dropdown (Admin Only when requested) */}
+      {Boolean(showTargetFolderDropdown) && (
+        <div className="glass-panel p-3 px-4 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-900/60">
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+            <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span>Upload Target Folder (Admin):</span>
+          </div>
+          <select
+            value={activeTargetFolder}
+            onChange={(e) => setActiveTargetFolder(e.target.value)}
+            className="bg-slate-800 text-xs font-bold text-indigo-200 px-3 py-1.5 rounded-xl border border-indigo-500/30 focus:outline-none focus:border-indigo-400 cursor-pointer shadow-sm"
+          >
+            <option value="BuildDrop_Uploads">BuildDrop_Uploads (Public User Storage)</option>
+            <option value="Private_BuildDrop_Uploads">Private_BuildDrop_Uploads (Private Storage)</option>
+          </select>
         </div>
-        <select
-          value={activeTargetFolder}
-          onChange={(e) => setActiveTargetFolder(e.target.value)}
-          className="bg-slate-800 text-xs font-bold text-indigo-200 px-3 py-1.5 rounded-xl border border-indigo-500/30 focus:outline-none focus:border-indigo-400 cursor-pointer shadow-sm"
-        >
-          <option value="BuildDrop_Uploads">BuildDrop_Uploads (Public User Storage)</option>
-          <option value="Private_BuildDrop_Uploads">Private_BuildDrop_Uploads (Private Storage)</option>
-        </select>
-      </div>
+      )}
 
       {/* Upload Success State Screen */}
       {uploadedVideo ? (
@@ -413,9 +437,11 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUp
                 <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-slate-300 border border-slate-700">
                   APK, ZIP, MP4, MKV, Any Format
                 </span>
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-indigo-300 border border-indigo-500/30">
-                  Target: {activeTargetFolder}
-                </span>
+                {Boolean(showTargetFolderDropdown) && (
+                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-indigo-300 border border-indigo-500/30">
+                    Target: {activeTargetFolder}
+                  </span>
+                )}
               </div>
             </div>
           ) : (
@@ -596,7 +622,16 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUp
               <History className="w-5 h-5 text-indigo-400" />
               <h3 className="text-base font-bold text-white">Your Recent Uploads (Last 3 Builds)</h3>
             </div>
-            <span className="text-xs text-slate-400 font-mono">{recentUploads.length} item(s)</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleClearAllHistory}
+                className="text-xs font-semibold text-rose-400 hover:text-rose-300 transition-colors"
+                title="Clear local upload cache"
+              >
+                Clear History
+              </button>
+              <span className="text-xs text-slate-400 font-mono">{recentUploads.length} item(s)</span>
+            </div>
           </div>
 
           <div className="space-y-3">
