@@ -1,7 +1,7 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { driveApi, getDirectDownloadUrl, fetchBlobWithProgress } from '../services/driveApi';
+import { driveApi, getDirectDownloadUrl } from '../services/driveApi';
 import { useToast } from '../context/ToastContext';
 import { expirationService } from '../services/expirationService';
 import { qrService } from '../services/qrService';
@@ -13,7 +13,6 @@ import { CopyLinkButton } from '../components/common/CopyLinkButton';
 import { VideoMetadata } from '../types';
 import { formatFileSize, isVideoFile as isVideoFileType, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../utils/fileType';
 import { isIOS } from '../utils/platform';
-import { TransferSpeedTracker, formatSpeed, formatEta } from '../utils/transferSpeed';
 import {
   Check,
   HardDrive,
@@ -35,10 +34,6 @@ export const WatchPage: React.FC = () => {
   const [isExpired, setIsExpired] = useState<boolean>(false);
   const [downloadReason] = useState<'downloaded' | 'expired'>('expired');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
-  const [downloadProgress, setDownloadProgress] = useState<number>(0);
-  const [downloadSpeed, setDownloadSpeed] = useState<number>(0);
-  const [downloadEta, setDownloadEta] = useState<number>(0);
-  const speedTrackerRef = useRef(new TransferSpeedTracker());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -120,47 +115,24 @@ export const WatchPage: React.FC = () => {
   const platformName = fileIsIpa ? 'iOS' : fileIsAndroidPackage ? 'Android' : 'build';
 
   // Direct download handler
-  const handleDownloadFile = async () => {
+  const handleDownloadFile = () => {
     try {
       setIsDownloading(true);
-      setDownloadProgress(0);
-      setDownloadSpeed(0);
-      setDownloadEta(0);
-      speedTrackerRef.current.reset(0);
+      const downloadUrl = getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name);
 
-      const blob = await fetchBlobWithProgress(
-        getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name),
-        {},
-        (loaded, total) => {
-          const { percent, speed, etaSeconds } = speedTrackerRef.current.update(loaded, total || video.size);
-          setDownloadProgress(percent);
-          setDownloadSpeed(speed);
-          setDownloadEta(etaSeconds);
-        },
-        video.size
-      );
-      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = blobUrl;
+      a.href = downloadUrl;
       a.download = video.originalFileName || video.name;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 
-      // 100% Download complete! Clean up file from Drive only after successful transfer
-      showToast('Download Complete', 'File downloaded successfully. Cleaning up file from Drive...', 'success');
-      await driveApi.consumeTemporaryDownload(video.driveFileId).catch(() => {});
-      setIsExpired(true);
+      showToast('Download Started', 'Your build file download has started.', 'success');
     } catch (e: any) {
       console.error('Download trigger error:', e);
-      // On error, do NOT delete the file from Drive
-      showToast('Download Failed', e?.message || 'Unable to download file. The file remains saved on Drive.', 'error', 8000);
+      showToast('Download Failed', e?.message || 'Unable to download file.', 'error', 8000);
     } finally {
-      setIsDownloading(false);
-      setDownloadProgress(0);
-      setDownloadSpeed(0);
-      setDownloadEta(0);
+      setTimeout(() => setIsDownloading(false), 2000);
     }
   };
 
@@ -330,11 +302,7 @@ export const WatchPage: React.FC = () => {
                     {isDownloading ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>
-                          {downloadProgress > 0
-                            ? `Downloading ${downloadProgress}%`
-                            : 'Preparing Download...'}
-                        </span>
+                        <span>Starting Download...</span>
                       </>
                     ) : (
                       <>
@@ -343,22 +311,6 @@ export const WatchPage: React.FC = () => {
                       </>
                     )}
                   </button>
-                )}
-
-                {/* Download Progress Bar */}
-                {isDownloading && (
-                  <div className="w-full space-y-1.5 pt-1">
-                    <div className="h-2 rounded-full bg-slate-800 border border-slate-700 overflow-hidden">
-                      <div
-                        className="h-full bg-[#84cc16] transition-all duration-300 ease-out rounded-full"
-                        style={{ width: `${downloadProgress}%` }}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                      <span>{formatSpeed(downloadSpeed)}</span>
-                      <span>{downloadEta > 0 ? `${formatEta(downloadEta)} left` : 'Calculating...'}</span>
-                    </div>
-                  </div>
                 )}
 
                 {/* Dedicated Download File Button */}

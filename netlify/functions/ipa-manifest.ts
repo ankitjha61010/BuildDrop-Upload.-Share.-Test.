@@ -108,11 +108,7 @@ export default async (req: Request) => {
   bundleId = bundleId || `com.builddrop.${fileId.slice(0, 12).toLowerCase()}`;
   bundleVersion = bundleVersion || '1.0.0';
 
-  const isTemporaryShare = Boolean(props.vidsetu_expires_at);
   const downloadParams = new URLSearchParams({ id: fileId, name: originalName });
-  if (isTemporaryShare) {
-    downloadParams.set('consume', '1');
-  }
   const ipaDownloadUrl = `${url.origin}/api/download-file?${downloadParams.toString()}`;
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
