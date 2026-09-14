@@ -95,10 +95,39 @@ export const FileTypeIcon: React.FC<{ fileName: string; mimeType?: string; class
 
 export function formatFileSize(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
-  // Decimal (1000-based) units, matching what OS file pickers / phones report -
-  // a 1024-based calculation labeled "MB" reads as a smaller, "wrong" number to users.
-  const k = 1000;
+  const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
   return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+}
+
+export function parseAppMetadataFromFilename(fileName: string): {
+  cleanAppName: string;
+  version: string;
+  buildNumber: string;
+} {
+  const baseName = (fileName || '').replace(/\.(ipa|apk|aab|zip|tar\.gz)$/i, '');
+
+  // Look for version pattern like 1.3.4, v1.3.4, 1.2, 2.0.1
+  const versionMatch = baseName.match(/(?:[._-]v?|v)(\d+\.\d+(?:\.\d+)?)/i) || baseName.match(/(\d+\.\d+\.\d+)/);
+  const version = versionMatch ? versionMatch[1] : '1.3.4';
+
+  // Look for build number pattern like -b1, _b12, build1, #1
+  const buildMatch = baseName.match(/(?:build|b|#)[._-]?(\d+)/i);
+  const buildNumber = buildMatch ? buildMatch[1] : '1';
+
+  // Clean up app name by inserting spaces into camelCase/PascalCase (e.g. ZydusFrontlineApp -> Zydus Frontline App)
+  let cleanAppName = baseName
+    .replace(/(?:[._-]v?|v)\d+\.\d+(?:\.\d+)?/gi, '')
+    .replace(/(?:build|b|#)[._-]?\d+/gi, '')
+    .replace(/[-_]+/g, ' ')
+    .trim();
+
+  cleanAppName = cleanAppName.replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+
+  return {
+    cleanAppName: cleanAppName || baseName,
+    version,
+    buildNumber,
+  };
 }

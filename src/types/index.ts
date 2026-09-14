@@ -25,6 +25,11 @@ export interface VideoMetadata {
   driveFolderId?: string;
   originalFileName: string;
   duration?: number;
+  appName?: string;
+  bundleId?: string;
+  bundleVersion?: string;
+  buildNumber?: string;
+  appIcon?: string;
 }
 
 export type UploadStatus = 

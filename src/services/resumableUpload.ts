@@ -21,6 +21,8 @@ export class ResumableUploader {
   private speedTracker: TransferSpeedTracker = new TransferSpeedTracker();
   private currentXHR: XMLHttpRequest | null = null;
 
+  private extractedMeta: { appName?: string; bundleId?: string; bundleVersion?: string; buildNumber?: string; appIcon?: string } = {};
+
   constructor(options: ResumableUploadOptions) {
     this.file = options.file;
     this.onProgress = options.onProgress;
@@ -52,10 +54,35 @@ export class ResumableUploader {
     this.isPaused = false;
     this.notifyProgress('preparing', 0, 0, 0, 0);
 
-    // Step 1: Ask our server to open a resumable session with Drive using the site owner's own
-    // credentials - the person uploading never needs a Google account of their own. The session
-    // URL it hands back is itself the authorization for the chunk PUTs that follow, so the file
-    // bytes go straight from this browser to Drive without passing through our server.
+    // Extract app logo, name, bundleId, version, buildNumber client-side
+    if (/\.(ipa|apk)$/i.test(this.file.name)) {
+      try {
+        const AppInfoParserModule = (await import('app-info-parser')).default;
+        const parser = new AppInfoParserModule(this.file);
+        const info: any = await parser.parse();
+
+        let rawAppName = info.CFBundleDisplayName || info.CFBundleName || info.application?.label;
+        if (Array.isArray(rawAppName)) rawAppName = rawAppName[0];
+        if (typeof rawAppName === 'object' && rawAppName) rawAppName = rawAppName.value || rawAppName[0];
+
+        const bundleId = info.CFBundleIdentifier || info.package;
+        const bundleVersion = info.CFBundleShortVersionString || info.versionName || info.CFBundleVersion;
+        const buildNumber = info.CFBundleVersion || (info.versionCode ? info.versionCode.toString() : undefined);
+        const appIcon = typeof info.icon === 'string' ? info.icon : undefined;
+
+        this.extractedMeta = {
+          appName: typeof rawAppName === 'string' ? rawAppName : undefined,
+          bundleId,
+          bundleVersion,
+          buildNumber,
+          appIcon,
+        };
+      } catch (err) {
+        console.warn('Browser app info extraction info:', err);
+      }
+    }
+
+    // Step 1: Ask our server to open a resumable session with Drive using the site owner's own credentials
     const { uploadUrl } = await fetchJson<{ uploadUrl?: string }>(
       '/api/init-upload',
       {
@@ -65,6 +92,11 @@ export class ResumableUploader {
           fileName: this.file.name,
           mimeType: this.file.type || 'application/octet-stream',
           fileSize: this.file.size,
+          appName: this.extractedMeta.appName,
+          bundleId: this.extractedMeta.bundleId,
+          bundleVersion: this.extractedMeta.bundleVersion,
+          buildNumber: this.extractedMeta.buildNumber,
+          appIcon: this.extractedMeta.appIcon,
         }),
       },
       'Starting the upload'
@@ -130,11 +162,6 @@ export class ResumableUploader {
             throw new Error(`Unexpected server response during chunk upload: HTTP ${result.status}`);
           }
         } catch (err: any) {
-          // Drive's resumable upload endpoint has a known quirk: the final PUT that completes
-          // the file (200/201 with the file resource) sometimes comes back without CORS headers,
-          // even though the earlier 308 responses for the same session had them - the browser
-          // reports this as a plain network error even though Drive already has the whole file.
-          // Confirm completion through our own server instead, which isn't subject to CORS.
           if (isFinalChunk) {
             try {
               const fileData = await fetchJson<any>(
@@ -148,7 +175,7 @@ export class ResumableUploader {
               );
               return await this.completeUpload(fileData);
             } catch {
-              // Not confirmed complete yet - fall through to the normal retry/backoff below.
+              // Not confirmed complete yet
             }
           }
 
@@ -157,9 +184,7 @@ export class ResumableUploader {
             this.notifyProgress('failed', this.calculatePercent(), this.currentByte, 0, 0, err.message);
             throw err;
           }
-          // Exponential backoff
           await new Promise((r) => setTimeout(r, Math.min(1000 * Math.pow(2, retries), 8000)));
-          // Query Drive for last confirmed received offset
           await this.queryUploadedStatus();
         }
       }
@@ -168,14 +193,11 @@ export class ResumableUploader {
     throw new Error('Upload loop completed without receiving final Google Drive file record.');
   }
 
-  // Shared by both the happy path (browser reads the 200/201 response directly) and the
-  // CORS-recovery path (server confirms completion on the browser's behalf) - see uploadNextChunks.
+  // Shared by both happy path and CORS recovery path
   private async completeUpload(fileData: any): Promise<VideoMetadata> {
     this.currentByte = this.file.size;
     this.notifyProgress('completed', 100, this.file.size, 0, 0, undefined, fileData.id);
 
-    // Set public sharing link permission (server-side, using the owner's own credentials)
-    // so the recipient can watch/download without signing in themselves.
     await fetchJson(
       '/api/finalize-upload',
       {
@@ -186,16 +208,15 @@ export class ResumableUploader {
       'Making the upload shareable'
     );
 
-    // Best-effort iOS OTA metadata extraction (bundle id/version/app name) for .ipa uploads -
-    // fire-and-forget so a slow or failed extraction never blocks the upload from completing.
-    // /api/ipa-manifest falls back to placeholder metadata if this hasn't finished yet.
-    if (/\.ipa$/i.test(this.file.name)) {
+    if (/\.(ipa|apk)$/i.test(this.file.name)) {
       fetch('/api/extract-ipa-metadata', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileId: fileData.id }),
       }).catch(() => {});
     }
+
+    const appProps = { ...fileData.appProperties, ...fileData.properties };
 
     const videoMeta: VideoMetadata = {
       id: fileData.id,
@@ -204,13 +225,18 @@ export class ResumableUploader {
       originalFileName: this.file.name,
       size: this.file.size,
       mimeType: fileData.mimeType,
-      createdAt: parseInt(fileData.properties?.vidsetu_created_at || fileData.appProperties?.vidsetu_created_at || Date.now().toString(), 10),
-      expiresAt: parseInt(fileData.properties?.vidsetu_expires_at || fileData.appProperties?.vidsetu_expires_at || (Date.now() + EXPIRATION_DURATION_MS).toString(), 10),
+      createdAt: parseInt(appProps.vidsetu_created_at || Date.now().toString(), 10),
+      expiresAt: parseInt(appProps.vidsetu_expires_at || (Date.now() + EXPIRATION_DURATION_MS).toString(), 10),
       isExpired: false,
       thumbnailLink: fileData.thumbnailLink,
       webContentLink: fileData.webContentLink,
       webViewLink: fileData.webViewLink,
       driveFolderId: fileData.parents?.[0],
+      appName: appProps.builddrop_app_name || this.extractedMeta.appName,
+      bundleId: appProps.builddrop_bundle_id || this.extractedMeta.bundleId,
+      bundleVersion: appProps.builddrop_bundle_version || this.extractedMeta.bundleVersion,
+      buildNumber: appProps.builddrop_build_number || this.extractedMeta.buildNumber || '1',
+      appIcon: appProps.builddrop_app_icon || this.extractedMeta.appIcon,
     };
 
     driveApi.cacheVideoMetadata(videoMeta);

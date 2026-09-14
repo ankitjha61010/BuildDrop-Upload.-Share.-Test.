@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { driveApi, isTemporaryUpload, getDirectDownloadUrl, fetchBlobWithProgress } from '../services/driveApi';
+import { QRCodeSVG } from 'qrcode.react';
+import { driveApi, getDirectDownloadUrl, fetchBlobWithProgress } from '../services/driveApi';
 import { useToast } from '../context/ToastContext';
 import { expirationService } from '../services/expirationService';
 import { qrService } from '../services/qrService';
@@ -9,20 +10,21 @@ import { ExpiredVideo } from '../components/player/ExpiredVideo';
 import { LoadingState } from '../components/common/LoadingState';
 import { ErrorState } from '../components/common/ErrorState';
 import { CopyLinkButton } from '../components/common/CopyLinkButton';
-import { QRModal } from '../components/common/QRModal';
 import { VideoMetadata } from '../types';
-import { formatFileSize, getFileTypeMeta, isVideoFile as isVideoFileType, isIpaFile, isAndroidPackageFile } from '../utils/fileType';
+import { formatFileSize, isVideoFile as isVideoFileType, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../utils/fileType';
 import { isIOS } from '../utils/platform';
 import { TransferSpeedTracker, formatSpeed, formatEta } from '../utils/transferSpeed';
 import {
-  Calendar,
+  Check,
   HardDrive,
-  QrCode,
   ArrowLeft,
   Download,
   Loader2,
   Smartphone,
   Info,
+  Layers,
+  Hash,
+  RefreshCw,
 } from 'lucide-react';
 
 export const WatchPage: React.FC = () => {
@@ -31,14 +33,13 @@ export const WatchPage: React.FC = () => {
   const [video, setVideo] = useState<VideoMetadata | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isExpired, setIsExpired] = useState<boolean>(false);
-  const [downloadReason, setDownloadReason] = useState<'downloaded' | 'expired'>('expired');
+  const [downloadReason] = useState<'downloaded' | 'expired'>('expired');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [downloadSpeed, setDownloadSpeed] = useState<number>(0);
   const [downloadEta, setDownloadEta] = useState<number>(0);
   const speedTrackerRef = useRef(new TransferSpeedTracker());
   const [error, setError] = useState<string | null>(null);
-  const [showQRModal, setShowQRModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (!videoId) {
@@ -54,7 +55,7 @@ export const WatchPage: React.FC = () => {
         const meta = await driveApi.getVideoMetadata(videoId);
         setVideo(meta);
 
-        // Check 3-day expiration
+        // Check expiration
         const timeCheck = expirationService.getTimeRemaining(meta.expiresAt);
         if (timeCheck.isExpired || meta.isExpired) {
           setIsExpired(true);
@@ -101,33 +102,24 @@ export const WatchPage: React.FC = () => {
 
   const watchUrl = qrService.getWatchUrl(video.id);
 
-  // Helper to determine if file is a playable video format
+  // File type detection
   const fileName = video.originalFileName || video.name || '';
   const isVideoFile = isVideoFileType(fileName, video.mimeType);
-
-  // iOS OTA install (.ipa only - .apk/.aab can never install on iOS, different OS entirely)
   const fileIsIpa = isIpaFile(fileName);
   const fileIsAndroidPackage = isAndroidPackageFile(fileName);
   const visitorIsIOS = isIOS();
   const manifestUrl = `${window.location.origin}/api/ipa-manifest?id=${encodeURIComponent(video.driveFileId)}`;
-  // A plain navigation, not routed through handleDownloadFile - iOS fetches the manifest and the
-  // .ipa itself entirely on-device after this, invisible to our JS. The one-time-link "consume"
-  // call for this path fires server-side instead, from inside download-file.ts (see ipa-manifest.ts
-  // and netlify/edge-functions/download-file.ts) once iOS actually fetches the .ipa bytes.
   const itmsInstallUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
 
-  // File type icon selector - covers video/image/audio/apk-aab-ipa/archive/document/other
-  const renderFileIcon = () => {
-    const meta = getFileTypeMeta(fileName, video.mimeType);
-    return (
-      <div className={`w-24 h-24 rounded-3xl ${meta.bg} border ${meta.border} flex items-center justify-center ${meta.iconColor}`}>
-        <meta.Icon className="w-12 h-12" />
-      </div>
-    );
-  };
+  // Formatted Metadata
+  const parsedMeta = parseAppMetadataFromFilename(fileName);
+  const cleanAppName = video.appName || parsedMeta.cleanAppName;
+  const bundleId = video.bundleId || (fileIsIpa ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : fileIsAndroidPackage ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : 'com.builddrop.app');
+  const bundleVersion = video.bundleVersion || parsedMeta.version;
+  const buildNumber = video.buildNumber || parsedMeta.buildNumber;
+  const platformName = fileIsIpa ? 'iOS' : fileIsAndroidPackage ? 'Android' : 'build';
 
-  // Direct download handler (works for anyone with link without requiring sign-in)
-  // After download is triggered, file is automatically purged from Drive and link expires
+  // Direct download handler
   const handleDownloadFile = async () => {
     try {
       setIsDownloading(true);
@@ -136,12 +128,6 @@ export const WatchPage: React.FC = () => {
       setDownloadEta(0);
       speedTrackerRef.current.reset(0);
 
-      // Public download, routed through our own /api/download-file proxy rather than
-      // drive.google.com directly - drive.google.com is a verified Android App Link, so a raw
-      // navigation there gets intercepted into a Google account-picker prompt instead of just
-      // downloading the file. Fetched (rather than a plain <a> navigation) so a broken/misrouted
-      // proxy response is caught here and surfaced as an error instead of silently being saved
-      // as if it were the real file. Works for anyone with the link - no sign-in required.
       const blob = await fetchBlobWithProgress(
         getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name),
         {},
@@ -162,20 +148,14 @@ export const WatchPage: React.FC = () => {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 
-      // 3. One-time link security: Delete file from Drive if it's a temporary upload, expire link, and show used state.
-      // Recipients only ever hold public "reader" access and have no Drive credentials of their
-      // own, so deletion has to run server-side (via a service-account-backed endpoint) rather
-      // than through the client-side Drive API, which only the file's owner could authorize.
-      if (isTemporaryUpload(video)) {
-        await driveApi.consumeTemporaryDownload(video.driveFileId);
-
-        // Lock UI immediately
-        setDownloadReason('downloaded');
-        setIsExpired(true);
-      }
+      // 100% Download complete! Clean up file from Drive only after successful transfer
+      showToast('Download Complete', 'File downloaded successfully. Cleaning up file from Drive...', 'success');
+      await driveApi.consumeTemporaryDownload(video.driveFileId).catch(() => {});
+      setIsExpired(true);
     } catch (e: any) {
       console.error('Download trigger error:', e);
-      showToast('Download Failed', e?.message || 'Unable to download this file right now.', 'error', 8000);
+      // On error, do NOT delete the file from Drive
+      showToast('Download Failed', e?.message || 'Unable to download file. The file remains saved on Drive.', 'error', 8000);
     } finally {
       setIsDownloading(false);
       setDownloadProgress(0);
@@ -185,7 +165,7 @@ export const WatchPage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 py-4 sm:py-8">
       {/* Top back navigation */}
       <div className="flex items-center justify-between gap-4 px-1">
         <Link
@@ -197,162 +177,203 @@ export const WatchPage: React.FC = () => {
         </Link>
       </div>
 
-      {/* Media or Universal File Download Container */}
       {isVideoFile ? (
         <div className="w-full">
           <VideoPlayer video={video} onDownload={handleDownloadFile} isDownloading={isDownloading} />
         </div>
       ) : (
-        <div className="glass-card p-6 sm:p-10 md:p-14 rounded-2xl sm:rounded-3xl border border-slate-800 text-center relative overflow-hidden shadow-2xl">
-          <div className="absolute top-0 right-0 -mt-10 -mr-10 w-60 h-60 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-          <div className="flex justify-center mb-6">{renderFileIcon()}</div>
-
-          <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 mb-3">
-            FILE READY FOR DOWNLOAD
-          </span>
-
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-white mb-2 max-w-xl mx-auto break-all">
-            {video.originalFileName || video.name}
-          </h2>
-
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 text-xs sm:text-sm text-slate-400 mb-8">
-            <span className="font-semibold text-slate-200">{formatFileSize(video.size)}</span>
-            <span>•</span>
-            <span className="font-mono text-indigo-300">{video.mimeType || 'Application/File'}</span>
-            <span>•</span>
-            <span className="text-emerald-400 font-semibold">Secure Direct Transfer</span>
-          </div>
-
-          <div className="flex flex-col items-center gap-3">
-            {fileIsIpa && visitorIsIOS && (
-              <a
-                href={itmsInstallUrl}
-                className="inline-flex items-center gap-2.5 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm sm:text-base shadow-xl shadow-emerald-600/40 hover:shadow-emerald-500/60 hover:scale-[1.02] transition-all"
-              >
-                <Smartphone className="w-5 h-5" />
-                <span>Install on this iPhone/iPad</span>
-              </a>
-            )}
-
-            {fileIsIpa && !visitorIsIOS && (
-              <div className="max-w-sm text-xs sm:text-sm text-slate-400 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-3 flex items-start gap-2 text-left">
-                <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                <span>This is an iOS app build. Open this link on an iPhone or iPad in Safari to install it directly.</span>
-              </div>
-            )}
-
-            {fileIsAndroidPackage && visitorIsIOS && (
-              <div className="max-w-sm text-xs sm:text-sm text-slate-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-start gap-2 text-left">
-                <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>This is an Android app build (.apk) and can't be installed on an iPhone or iPad. You can still download the raw file below.</span>
-              </div>
-            )}
-
-            <button
-              onClick={handleDownloadFile}
-              disabled={isDownloading}
-              className="inline-flex items-center gap-2.5 px-6 sm:px-8 py-3.5 sm:py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm sm:text-base shadow-xl shadow-indigo-600/40 hover:shadow-indigo-500/60 hover:scale-[1.02] transition-all disabled:opacity-50"
-            >
-              {isDownloading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>
-                    {downloadProgress > 0
-                      ? `Downloading ${downloadProgress}%`
-                      : 'Preparing Download...'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-5 h-5" />
-                  <span>
-                    {fileIsIpa && visitorIsIOS
-                      ? `Download .ipa File (${formatFileSize(video.size)})`
-                      : `Download File (${formatFileSize(video.size)})`}
-                  </span>
-                </>
-              )}
-            </button>
-
-            {isDownloading && (
-              <div className="w-full max-w-sm space-y-1.5">
-                <div className="h-2 rounded-full bg-slate-800 border border-slate-700 overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 transition-all duration-300 ease-out rounded-full"
-                    style={{ width: `${downloadProgress}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>{formatSpeed(downloadSpeed)}</span>
-                  <span>{downloadEta > 0 ? `${formatEta(downloadEta)} left` : 'Calculating...'}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Video / File Details & Interaction Panel */}
-      <div className="glass-card p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl border border-slate-800 space-y-4 sm:space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 sm:pb-6 border-b border-slate-800">
-          <div className="min-w-0 space-y-1">
-            <h1 className="text-lg sm:text-xl md:text-2xl font-extrabold text-white truncate" title={video.originalFileName || video.name}>
-              {video.originalFileName || video.name}
+        <div className="space-y-6 sm:space-y-8">
+          {/* Header Section */}
+          <div className="text-center space-y-2">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-lg shadow-emerald-500/10">
+              <Check className="w-7 h-7 stroke-[2.5]" />
+            </div>
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+              Upload Successful!
             </h1>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs text-slate-400">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                Uploaded {new Date(video.createdAt).toLocaleDateString()}
-              </span>
-              <span className="flex items-center gap-1">
-                <HardDrive className="w-3.5 h-3.5 text-slate-500" />
-                {formatFileSize(video.size)}
-              </span>
-              <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 font-mono text-[11px] border border-indigo-500/20">
-                {video.mimeType}
-              </span>
+            <p className="text-slate-400 text-sm sm:text-base max-w-md mx-auto">
+              Your {platformName} build is ready to be shared and installed.
+            </p>
+          </div>
+
+          {/* App Build Details Card */}
+          <div className="bg-[#121622]/90 border border-slate-800/90 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl max-w-2xl mx-auto">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 sm:gap-6 text-center sm:text-left">
+              {/* App Icon */}
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-purple-600 via-indigo-600 to-slate-900 border border-white/10 shadow-xl flex flex-col items-center justify-center text-white shrink-0 relative overflow-hidden group">
+                {video.appIcon ? (
+                  <img
+                    src={video.appIcon}
+                    alt={cleanAppName}
+                    className="w-full h-full object-cover rounded-2xl p-1 bg-slate-950/40"
+                  />
+                ) : (
+                  <>
+                    <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 mb-1">
+                      <Smartphone className="w-6 h-6 text-white" />
+                    </div>
+                    <span className="text-[10px] font-bold tracking-wider uppercase text-white/80 truncate max-w-[80px]">
+                      {cleanAppName.slice(0, 8)}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Title & App Metadata */}
+              <div className="flex-1 min-w-0 space-y-3">
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white truncate" title={cleanAppName}>
+                    {cleanAppName}
+                  </h2>
+                  <p className="font-mono text-xs text-slate-400 truncate mt-0.5" title={bundleId}>
+                    {bundleId}
+                  </p>
+                </div>
+
+                {/* Stats Row */}
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6 pt-1 text-xs text-slate-300 font-medium">
+                  <div className="flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-400">Version</span>
+                    <span className="font-semibold text-slate-100">{bundleVersion}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Hash className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-400">Build</span>
+                    <span className="font-semibold text-slate-100">{buildNumber}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <HardDrive className="w-4 h-4 text-slate-400" />
+                    <span className="text-slate-400">Size</span>
+                    <span className="font-semibold text-slate-100">{formatFileSize(video.size)}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Quick Sharing Toolbar */}
-          <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
-            {isVideoFile && (
-              <button
-                onClick={handleDownloadFile}
-                disabled={isDownloading}
-                title={isDownloading ? `Downloading ${downloadProgress}% (${formatSpeed(downloadSpeed)})` : 'Download Video'}
-                className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all disabled:opacity-60"
-              >
-                {isDownloading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
+          {/* QR Code & Share / Install Controls Card */}
+          <div className="bg-[#121622]/90 border border-slate-800/90 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl max-w-2xl mx-auto">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6 sm:gap-8">
+              {/* Scan to install column */}
+              <div className="flex flex-col items-center shrink-0">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                  Scan to install
+                </span>
+                <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xl flex items-center justify-center">
+                  <QRCodeSVG
+                    value={watchUrl}
+                    size={175}
+                    level="H"
+                    includeMargin={false}
+                  />
+                </div>
+              </div>
+
+              {/* Vertical divider */}
+              <div className="hidden md:block w-[1px] bg-slate-800/80 self-stretch my-2"></div>
+
+              {/* Share link & actions column */}
+              <div className="flex-1 min-w-0 w-full space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-2">
+                    Public Share Link
+                  </label>
+                  <div className="bg-[#090c13] border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between font-mono text-xs sm:text-sm text-slate-300 gap-2">
+                    <span className="truncate select-all">{watchUrl}</span>
+                    <CopyLinkButton url={watchUrl} variant="icon" />
+                  </div>
+                </div>
+
+                {/* Info prompts for platform compatibility */}
+                {fileIsIpa && !visitorIsIOS && (
+                  <div className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/60 rounded-xl p-3 flex items-start gap-2 text-left">
+                    <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                    <span>Open this link in Safari on an iPhone or iPad to install directly OTA.</span>
+                  </div>
                 )}
-                <span>{isDownloading && downloadProgress > 0 ? `${downloadProgress}%` : 'Download'}</span>
-              </button>
-            )}
 
-            <CopyLinkButton url={watchUrl} label="Copy Link" />
+                {fileIsAndroidPackage && visitorIsIOS && (
+                  <div className="text-xs text-slate-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-start gap-2 text-left">
+                    <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>This is an Android APK build and cannot be installed on iOS.</span>
+                  </div>
+                )}
 
-            <button
-              onClick={() => setShowQRModal(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition-colors"
-            >
-              <QrCode className="w-4 h-4 text-indigo-400" />
-              <span>QR Code</span>
-            </button>
+                {/* Primary Action Button - Lime Green */}
+                {fileIsIpa && visitorIsIOS ? (
+                  <a
+                    href={itmsInstallUrl}
+                    className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer"
+                  >
+                    <Smartphone className="w-5 h-5" />
+                    <span>Install on Device</span>
+                  </a>
+                ) : (
+                  <button
+                    onClick={handleDownloadFile}
+                    disabled={isDownloading}
+                    className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>
+                          {downloadProgress > 0
+                            ? `Downloading ${downloadProgress}%`
+                            : 'Preparing Download...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Smartphone className="w-5 h-5" />
+                        <span>Install on Device</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Download Progress Bar */}
+                {isDownloading && (
+                  <div className="w-full space-y-1.5 pt-1">
+                    <div className="h-2 rounded-full bg-slate-800 border border-slate-700 overflow-hidden">
+                      <div
+                        className="h-full bg-[#84cc16] transition-all duration-300 ease-out rounded-full"
+                        style={{ width: `${downloadProgress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                      <span>{formatSpeed(downloadSpeed)}</span>
+                      <span>{downloadEta > 0 ? `${formatEta(downloadEta)} left` : 'Calculating...'}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dedicated Download File Button */}
+                <button
+                  onClick={handleDownloadFile}
+                  disabled={isDownloading}
+                  className="w-full py-3 px-6 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-4 h-4 text-indigo-400" />
+                  <span>Download Build File ({formatFileSize(video.size)})</span>
+                </button>
+
+                {/* Secondary Action - Upload Another Build */}
+                <Link
+                  to="/"
+                  className="w-full py-2.5 px-6 rounded-xl hover:bg-slate-800/60 text-slate-400 hover:text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all text-center"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Upload Another Build</span>
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-
-      {showQRModal && (
-        <QRModal
-          isOpen={showQRModal}
-          onClose={() => setShowQRModal(false)}
-          videoId={video.id}
-          videoTitle={video.originalFileName || video.name}
-        />
       )}
     </div>
   );

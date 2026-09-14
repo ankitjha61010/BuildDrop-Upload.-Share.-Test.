@@ -54,10 +54,6 @@ export default async (req: Request) => {
   const bundleVersion = props.builddrop_bundle_version || '1.0';
   const title = props.builddrop_app_name || originalName.replace(/\.ipa$/i, '');
 
-  // Only a temporary one-time-download share (vidsetu_expires_at set by ResumableUploader) gets
-  // auto-deleted after the OS fetches it - matches the same distinction handleDownloadFile makes
-  // for a manual browser download, so a permanent library .ipa never gets wiped by someone
-  // installing it.
   const isTemporaryShare = Boolean(props.vidsetu_expires_at);
   const downloadParams = new URLSearchParams({ id: fileId, name: originalName });
   if (isTemporaryShare) {

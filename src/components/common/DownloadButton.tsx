@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
-import { driveApi, isTemporaryUpload, getDirectDownloadUrl, fetchBlobWithProgress } from '../../services/driveApi';
+import { getDirectDownloadUrl, fetchBlobWithProgress } from '../../services/driveApi';
 import { useToast } from '../../context/ToastContext';
 import { VideoMetadata } from '../../types';
 import { TransferSpeedTracker, formatSpeed, formatEta } from '../../utils/transferSpeed';
@@ -72,14 +72,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      // One-time link security: once a temporary share has been downloaded, remove it from Drive
-      // immediately instead of leaving it to sit there until the uploader happens to purge it.
-      if (isTemporaryUpload(video)) {
-        await driveApi.consumeTemporaryDownload(video.driveFileId);
-        showToast('Download Complete', 'This was a one-time link - the file has now been removed from Drive.', 'success');
-      } else {
-        showToast('Download Started', 'Your video file is downloading.', 'success');
-      }
+      showToast('Download Started', 'Your file is downloading.', 'success');
     } catch (err: any) {
       console.error('Download error:', err);
       showToast('Download Failed', err.message || 'Unable to download file from Google Drive.', 'error');

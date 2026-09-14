@@ -71,34 +71,38 @@ export default async (req: Request) => {
     const parser = new AppInfoParser(tmpPath);
     const result: any = await parser.parse();
 
-    const bundleId: string | undefined = result?.CFBundleIdentifier;
-    const bundleVersion: string | undefined = result?.CFBundleShortVersionString || result?.CFBundleVersion;
-    const appName: string | undefined = result?.CFBundleDisplayName || result?.CFBundleName;
+    let rawAppName = result?.CFBundleDisplayName || result?.CFBundleName || result?.application?.label;
+    if (Array.isArray(rawAppName)) rawAppName = rawAppName[0];
+    if (typeof rawAppName === 'object' && rawAppName) rawAppName = rawAppName.value || rawAppName[0];
 
-    if (!bundleId) {
-      return Response.json({ success: false, reason: 'no_bundle_id' });
-    }
+    const bundleId: string | undefined = result?.CFBundleIdentifier || result?.package;
+    const bundleVersion: string | undefined = result?.CFBundleShortVersionString || result?.versionName || result?.CFBundleVersion;
+    const buildNumber: string | undefined = result?.CFBundleVersion || (result?.versionCode ? result.versionCode.toString() : undefined);
+    const appIcon: string | undefined = typeof result?.icon === 'string' ? result.icon : undefined;
 
-    const properties: Record<string, string> = { builddrop_bundle_id: bundleId };
-    if (bundleVersion) properties.builddrop_bundle_version = bundleVersion;
-    if (appName) properties.builddrop_app_name = appName;
+    const properties: Record<string, string> = {};
+    if (bundleId) properties.builddrop_bundle_id = bundleId.slice(0, 100);
+    if (bundleVersion) properties.builddrop_bundle_version = bundleVersion.slice(0, 50);
+    if (buildNumber) properties.builddrop_build_number = buildNumber.slice(0, 50);
+    if (typeof rawAppName === 'string' && rawAppName) properties.builddrop_app_name = rawAppName.slice(0, 100);
 
-    const patchRes = await fetch(
-      `${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
-      {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ properties }),
+    if (Object.keys(properties).length > 0) {
+      const patchRes = await fetch(
+        `${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
+        {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ properties }),
+        }
+      );
+      if (!patchRes.ok) {
+        console.error('Failed to save app metadata to Drive:', patchRes.status, await patchRes.text());
       }
-    );
-    if (!patchRes.ok) {
-      console.error('Failed to save ipa metadata to Drive:', patchRes.status, await patchRes.text());
-      return Response.json({ success: false, reason: 'save_failed' });
     }
 
-    return Response.json({ success: true, bundleId, bundleVersion, appName });
+    return Response.json({ success: true, bundleId, bundleVersion, appName: rawAppName, appIcon: Boolean(appIcon) });
   } catch (err) {
-    console.error('Failed to parse .ipa metadata:', err);
+    console.error('Failed to parse app metadata:', err);
     return Response.json({ success: false, reason: 'parse_failed' });
   } finally {
     await unlink(tmpPath).catch(() => {});

@@ -158,6 +158,11 @@ export class DriveApiService {
       webContentLink: file.webContentLink || `https://drive.google.com/uc?export=download&id=${file.id}`,
       webViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
       driveFolderId: file.parents?.[0] || folderIdHint,
+      appName: appProps.builddrop_app_name || fallbackLocal.appName,
+      bundleId: appProps.builddrop_bundle_id || fallbackLocal.bundleId,
+      bundleVersion: appProps.builddrop_bundle_version || fallbackLocal.bundleVersion,
+      buildNumber: appProps.builddrop_build_number || fallbackLocal.buildNumber || '1',
+      appIcon: appProps.builddrop_app_icon || fallbackLocal.appIcon,
     };
 
     this.cacheVideoMetadata(meta);
@@ -282,6 +287,11 @@ export class DriveApiService {
       createdAt: meta.createdAt,
       expiresAt: meta.expiresAt,
       thumbnailLink: meta.thumbnailLink,
+      appName: meta.appName,
+      bundleId: meta.bundleId,
+      bundleVersion: meta.bundleVersion,
+      buildNumber: meta.buildNumber,
+      appIcon: meta.appIcon,
     };
     localStorage.setItem(STORAGE_KEY_LOCAL_METAS, JSON.stringify(cache));
   }

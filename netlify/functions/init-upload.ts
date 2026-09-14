@@ -54,12 +54,17 @@ export default async (req: Request) => {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  let fileName: unknown, mimeType: unknown, fileSize: unknown;
+  let fileName: unknown, mimeType: unknown, fileSize: unknown, appName: unknown, bundleId: unknown, bundleVersion: unknown, buildNumber: unknown, appIcon: unknown;
   try {
     const body = await req.json();
     fileName = body?.fileName;
     mimeType = body?.mimeType;
     fileSize = body?.fileSize;
+    appName = body?.appName;
+    bundleId = body?.bundleId;
+    bundleVersion = body?.bundleVersion;
+    buildNumber = body?.buildNumber;
+    appIcon = body?.appIcon;
   } catch {
     return new Response('Invalid JSON body', { status: 400 });
   }
@@ -94,16 +99,22 @@ export default async (req: Request) => {
   const expiresAt = createdAt + EXPIRATION_DURATION_MS;
   const resolvedMimeType = typeof mimeType === 'string' && mimeType ? mimeType : 'application/octet-stream';
 
+  const propertiesRecord: Record<string, string> = {
+    vidsetu_created_at: createdAt.toString(),
+    vidsetu_expires_at: expiresAt.toString(),
+    original_name: fileName,
+  };
+  if (typeof appName === 'string' && appName) propertiesRecord.builddrop_app_name = appName.slice(0, 100);
+  if (typeof bundleId === 'string' && bundleId) propertiesRecord.builddrop_bundle_id = bundleId.slice(0, 100);
+  if (typeof bundleVersion === 'string' && bundleVersion) propertiesRecord.builddrop_bundle_version = bundleVersion.slice(0, 50);
+  if (typeof buildNumber === 'string' && buildNumber) propertiesRecord.builddrop_build_number = buildNumber.slice(0, 50);
+
   const metadata = {
     name: fileName,
     mimeType: resolvedMimeType,
     parents: [folderId],
-    description: `Uploaded via VidSetu. Expires at ${new Date(expiresAt).toISOString()}`,
-    properties: {
-      vidsetu_created_at: createdAt.toString(),
-      vidsetu_expires_at: expiresAt.toString(),
-      original_name: fileName,
-    },
+    description: `Uploaded via BuildDrop. Expires at ${new Date(expiresAt).toISOString()}`,
+    properties: propertiesRecord,
   };
 
   const sessionRes = await fetch(
