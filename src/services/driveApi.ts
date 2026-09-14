@@ -1,5 +1,6 @@
 import { VideoMetadata } from '../types';
 import { isVideoFile as isVideoFileType } from '../utils/fileType';
+import { getOrCreateUserId } from '../utils/userId';
 
 const DRIVE_API_V3 = 'https://www.googleapis.com/drive/v3';
 const STORAGE_KEY_LOCAL_METAS = 'vidsetu_local_video_metas';
@@ -326,6 +327,8 @@ export class DriveApiService {
       bundleVersion: meta.bundleVersion,
       buildNumber: meta.buildNumber,
       appIcon: meta.appIcon,
+      uploadType: meta.uploadType,
+      userId: meta.userId || getOrCreateUserId(),
     };
     localStorage.setItem(STORAGE_KEY_LOCAL_METAS, JSON.stringify(cache));
   }

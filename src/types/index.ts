@@ -31,6 +31,7 @@ export interface VideoMetadata {
   buildNumber?: string;
   appIcon?: string;
   uploadType?: 'NORMAL' | 'PRIVATE';
+  userId?: string;
 }
 
 export type UploadStatus = 

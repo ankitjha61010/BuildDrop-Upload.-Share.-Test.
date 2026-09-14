@@ -8,6 +8,7 @@ import { CopyLinkButton } from '../common/CopyLinkButton';
 import { QRModal } from '../common/QRModal';
 import { FileCategory, formatFileSize, getFileTypeMeta, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../../utils/fileType';
 import { driveApi } from '../../services/driveApi';
+import { getOrCreateUserId } from '../../utils/userId';
 import {
   UploadCloud,
   CheckCircle2,
@@ -45,9 +46,10 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadRecentUploads = async () => {
+    const currentUserId = getOrCreateUserId();
     const cache = driveApi.getLocalMetadataCache();
     const list = Object.values(cache)
-      .filter((item): item is VideoMetadata => Boolean(item && item.id && item.name))
+      .filter((item): item is VideoMetadata => Boolean(item && item.id && item.name && (!item.userId || item.userId === currentUserId)))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       .slice(0, 3);
     setRecentUploads(list);
