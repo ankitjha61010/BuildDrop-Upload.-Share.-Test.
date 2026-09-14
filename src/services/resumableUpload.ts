@@ -4,7 +4,7 @@ import { TransferSpeedTracker } from '../utils/transferSpeed';
 
 export const MAX_FILE_SIZE_BYTES = 12 * 1024 * 1024 * 1024; // 12 GB exactly
 export const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB chunk size for high performance large file upload
-export const EXPIRATION_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 Days (72 hours) in milliseconds
+export const EXPIRATION_DURATION_MS = 12 * 24 * 60 * 60 * 1000; // 12 Days (288 hours) in milliseconds
 
 export interface ResumableUploadOptions {
   file: File;

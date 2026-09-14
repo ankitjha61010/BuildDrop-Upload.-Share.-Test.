@@ -1,4 +1,4 @@
-export const EXPIRATION_HOURS = 72; // 3 Days (72 hours)
+export const EXPIRATION_HOURS = 288; // 12 Days (288 hours)
 
 export interface ExpirationTimeRemaining {
   days: number;
@@ -12,7 +12,7 @@ export interface ExpirationTimeRemaining {
 
 export class ExpirationService {
   /**
-   * Calculate precise time remaining until 3-day expiration
+   * Calculate precise time remaining until 12-day expiration
    */
   public getTimeRemaining(expiresAt: number): ExpirationTimeRemaining {
     const now = Date.now();

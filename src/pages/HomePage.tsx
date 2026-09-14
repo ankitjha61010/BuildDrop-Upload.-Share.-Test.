@@ -34,8 +34,8 @@ export const HomePage: React.FC = () => {
     },
     {
       icon: Clock,
-      title: '3-Day Ephemeral Lifespan',
-      desc: 'Automated 3-day access expiration model with live countdown timers and client-side cleanup garbage collection.',
+      title: '12-Day Ephemeral Lifespan',
+      desc: 'Automated 12-day access expiration model with live countdown timers and client-side cleanup garbage collection.',
     },
     {
       icon: QrCode,
@@ -69,7 +69,7 @@ export const HomePage: React.FC = () => {
         </h1>
 
         <p className="mt-3 text-sm sm:text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
-          Upload up to 12 GB of any file (APK, ZIP, video, docs, anything) with resumable chunking, generate a shareable QR link, and let it auto-delete after a 3-day window or first download.
+          Upload up to 12 GB of any file (APK, ZIP, video, docs, anything) with resumable chunking, generate a shareable QR link, and let it auto-delete after a 12-day window or first download.
         </p>
       </section>
 

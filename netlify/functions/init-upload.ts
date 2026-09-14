@@ -9,7 +9,7 @@ import { getDriveAccessToken } from '../lib/googleDriveAuth';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const MAX_FILE_SIZE_BYTES = 12 * 1024 * 1024 * 1024; // 12 GB
-const EXPIRATION_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+const EXPIRATION_DURATION_MS = 12 * 24 * 60 * 60 * 1000; // 12 days
 
 function getUploadsFolderName(): string {
   return (process.env.VITE_UPLOADS_FOLDER_NAME || 'VidSetu_Uploads').trim();

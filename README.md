@@ -1,7 +1,7 @@
 # BuildDrop — Upload. Share. Test.
 
 > **Frontend-first file drop & sharing app, backed by Google Drive**
-> Upload any file (APK, ZIP, video, docs, anything) up to 12 GB, get a shareable link/QR code, and let it auto-delete after a 3-day window or the first download. Deployed as a static site + Netlify Functions.
+> Upload any file (APK, ZIP, video, docs, anything) up to 12 GB, get a shareable link/QR code, and let it auto-delete after a 12-day window or the first download. Deployed as a static site + Netlify Functions.
 
 ---
 
@@ -16,8 +16,8 @@
    - Uploads and downloads are proxied through server-side Netlify Functions that hold the site owner's own Google OAuth refresh token.
    - Neither the uploader nor the recipient ever needs a Google account or sees any credentials.
 
-3. **One-Time / 3-Day Ephemeral Links**
-   - Every upload gets a 3-day expiration window, and is deleted from Drive immediately after the first successful download.
+3. **One-Time / 12-Day Ephemeral Links**
+   - Every upload gets a 12-day expiration window, and is deleted from Drive immediately after the first successful download.
    - Live countdown timer on the share page.
 
 4. **Instant QR Code & Link Sharing**
