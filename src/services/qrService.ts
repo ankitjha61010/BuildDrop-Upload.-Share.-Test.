@@ -1,12 +1,14 @@
 import QRCode from 'qrcode';
+import { encodeFileId } from '../utils/urlSecurity';
 
 export class QRService {
   /**
-   * Generates public Watch URL without exposing any OAuth tokens or private credentials
+   * Generates public Watch URL without exposing any OAuth tokens or raw Drive IDs
    */
   public getWatchUrl(videoId: string): string {
     const origin = window.location.origin;
-    return `${origin}/watch/${encodeURIComponent(videoId)}`;
+    const secureToken = encodeFileId(videoId);
+    return `${origin}/watch/${encodeURIComponent(secureToken)}`;
   }
 
   /**

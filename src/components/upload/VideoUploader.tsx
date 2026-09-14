@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../../context/ToastContext';
 import { ResumableUploader, MAX_FILE_SIZE_BYTES } from '../../services/resumableUpload';
 import { UploadProgress } from './UploadProgress';
@@ -7,27 +7,73 @@ import { qrService } from '../../services/qrService';
 import { CopyLinkButton } from '../common/CopyLinkButton';
 import { QRModal } from '../common/QRModal';
 import { FileCategory, formatFileSize, getFileTypeMeta, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../../utils/fileType';
+import { driveApi } from '../../services/driveApi';
 import {
   UploadCloud,
   CheckCircle2,
   QrCode,
   ShieldAlert,
   Smartphone,
+  Folder,
+  Copy,
+  Trash2,
+  ExternalLink,
+  History,
 } from 'lucide-react';
 
-export const VideoUploader: React.FC = () => {
+interface VideoUploaderProps {
+  targetFolder?: string;
+  onUploadComplete?: (video: VideoMetadata) => void;
+}
+
+export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, onUploadComplete }) => {
   const { showToast } = useToast();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [parsedFileMeta, setParsedFileMeta] = useState<{ appName?: string; bundleId?: string; bundleVersion?: string; buildNumber?: string; appIcon?: string } | null>(null);
   const [fileCategory, setFileCategory] = useState<FileCategory>('other');
   const [dragActive, setDragActive] = useState(false);
   const [progressInfo, setProgressInfo] = useState<UploadProgressInfo | null>(null);
   const [uploadedVideo, setUploadedVideo] = useState<VideoMetadata | null>(null);
   const [uploaderInstance, setUploaderInstance] = useState<ResumableUploader | null>(null);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [activeTargetFolder, setActiveTargetFolder] = useState<string>(targetFolder || 'BuildDrop_Uploads');
+  const [recentUploads, setRecentUploads] = useState<VideoMetadata[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadRecentUploads = () => {
+    const cache = driveApi.getLocalMetadataCache();
+    const list = Object.values(cache)
+      .filter((item): item is VideoMetadata => Boolean(item && item.id && item.name))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 3);
+    setRecentUploads(list);
+  };
+
+  useEffect(() => {
+    loadRecentUploads();
+  }, []);
+
+  const handleDeleteRecent = async (fileId: string, fileName: string) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${fileName}"? This will delete the build folder and all its contents.`)) {
+      return;
+    }
+    try {
+      await driveApi.consumeTemporaryDownload(fileId);
+      showToast('Build Deleted', `"${fileName}" has been deleted.`, 'info');
+      loadRecentUploads();
+    } catch (err: any) {
+      showToast('Delete Error', err.message || 'Failed to delete build.', 'error');
+    }
+  };
+
+  const handleCopyRecentLink = (fileId: string) => {
+    const watchUrl = qrService.getWatchUrl(fileId);
+    navigator.clipboard.writeText(watchUrl);
+    showToast('Link Copied', 'Share link copied to clipboard!', 'success');
+  };
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -55,9 +101,9 @@ export const VideoUploader: React.FC = () => {
   };
 
   const handleFileSelection = (file: File) => {
-    // Reset previous states
     setUploadedVideo(null);
     setProgressInfo(null);
+    setParsedFileMeta(null);
     if (videoPreviewUrl) {
       URL.revokeObjectURL(videoPreviewUrl);
       setVideoPreviewUrl(null);
@@ -66,7 +112,7 @@ export const VideoUploader: React.FC = () => {
     if (file.size > MAX_FILE_SIZE_BYTES) {
       showToast(
         'File Too Large',
-        `Maximum video size is 12 GB. Selected file is ${(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB.`,
+        `Maximum file size is 12 GB. Selected file is ${(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB.`,
         'error',
         6000
       );
@@ -79,8 +125,6 @@ export const VideoUploader: React.FC = () => {
     const category = getFileTypeMeta(file.name, file.type).category;
     setFileCategory(category);
 
-    // Only videos and images can be rendered as an actual media preview;
-    // everything else (zip/apk/aab/ipa/docs/...) gets a file-type icon instead.
     if (category === 'video' || category === 'image') {
       try {
         const url = URL.createObjectURL(file);
@@ -91,6 +135,119 @@ export const VideoUploader: React.FC = () => {
     } else {
       setVideoPreviewUrl(null);
     }
+
+    // Immediately extract app info for IPA / APK files using browser bundle
+    if (/\.(ipa|apk)$/i.test(file.name)) {
+      import('app-info-parser/dist/app-info-parser.js').then(async (module) => {
+        try {
+          const AppInfoParserModule = module.default || (module as any).AppInfoParser || (window as any).AppInfoParser;
+          if (!AppInfoParserModule) return;
+
+          const parser = new AppInfoParserModule(file);
+          const info: any = await parser.parse();
+
+          let rawAppName = info.CFBundleDisplayName || info.CFBundleName || info.application?.label;
+          if (Array.isArray(rawAppName)) rawAppName = rawAppName[0];
+          if (typeof rawAppName === 'object' && rawAppName) rawAppName = rawAppName.value || rawAppName[0];
+
+          const bundleId = info.CFBundleIdentifier || info.package;
+          const bundleVersion = info.CFBundleShortVersionString || info.versionName || info.CFBundleVersion;
+          const buildNumber = info.CFBundleVersion || (info.versionCode ? info.versionCode.toString() : undefined);
+
+          let appIconData: string | undefined = undefined;
+
+          // Density-ordered regex matching for crisp HD launcher icons
+          const densityRegexes = [
+            /mipmap-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+            /mipmap-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+            /drawable-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+            /drawable-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+            /mipmap-xxxhdpi.*\.(png|webp)$/i,
+            /mipmap-xxhdpi.*\.(png|webp)$/i,
+            /drawable-xxxhdpi.*\.(png|webp)$/i,
+            /drawable-xxhdpi.*\.(png|webp)$/i,
+            /mipmap-xhdpi.*ic_launcher.*\.(png|webp)$/i,
+            /mipmap-hdpi.*ic_launcher.*\.(png|webp)$/i,
+            /AppIcon.*60x60@3x\.png$/i,
+            /AppIcon.*60x60@2x\.png$/i,
+          ];
+
+          if (typeof (parser as any).getEntry === 'function') {
+            for (const regex of densityRegexes) {
+              try {
+                const iconBuffer = await (parser as any).getEntry(regex);
+                if (iconBuffer && iconBuffer.length > 0) {
+                  const base64 = Buffer.from(iconBuffer).toString('base64');
+                  appIconData = `data:image/png;base64,${base64}`;
+                  break;
+                }
+              } catch {}
+            }
+          }
+
+          if (!appIconData) {
+            let rawIconPaths: any = info?.application?.icon || info?.icon;
+            if (rawIconPaths && !Array.isArray(rawIconPaths) && typeof rawIconPaths === 'object') {
+              rawIconPaths = Object.values(rawIconPaths);
+            }
+
+            if (Array.isArray(rawIconPaths)) {
+              const pngPaths: string[] = rawIconPaths
+                .map((p: any) => (typeof p === 'string' ? p : p?.path || ''))
+                .filter((p: string) => typeof p === 'string' && /\.(png|webp)$/i.test(p));
+
+              const scorePath = (p: string) => {
+                let score = 0;
+                const lower = p.toLowerCase();
+                if (lower.includes('xxxhdpi') || lower.includes('512') || lower.includes('192')) score += 50;
+                else if (lower.includes('xxhdpi') || lower.includes('144')) score += 40;
+                else if (lower.includes('xhdpi') || lower.includes('96')) score += 30;
+                else if (lower.includes('hdpi') || lower.includes('72')) score += 20;
+
+                if (lower.includes('ic_launcher') || lower.includes('app_icon')) score += 15;
+                if (lower.includes('foreground') || lower.includes('background')) score -= 5;
+                return score;
+              };
+
+              pngPaths.sort((a, b) => scorePath(b) - scorePath(a));
+
+              for (const candidatePath of pngPaths) {
+                if (typeof (parser as any).getEntry === 'function') {
+                  try {
+                    const iconBuffer = await (parser as any).getEntry(candidatePath);
+                    if (iconBuffer && iconBuffer.length > 0) {
+                      const base64 = Buffer.from(iconBuffer).toString('base64');
+                      appIconData = `data:image/png;base64,${base64}`;
+                      break;
+                    }
+                  } catch {}
+                }
+              }
+            }
+          }
+
+          if (!appIconData) {
+            let rawIcon = info.icon;
+            if (rawIcon && typeof rawIcon.then === 'function') {
+              rawIcon = await rawIcon;
+            }
+            if (typeof rawIcon === 'string' && rawIcon.startsWith('data:image/')) {
+              appIconData = rawIcon;
+            }
+          }
+
+          setParsedFileMeta({
+            appName: typeof rawAppName === 'string' ? rawAppName : undefined,
+            bundleId,
+            bundleVersion,
+            buildNumber,
+            appIcon: appIconData,
+          });
+        } catch (err) {
+          console.warn('Pre-upload app info extraction error:', err);
+        }
+      });
+    }
   };
 
   const startUpload = async () => {
@@ -98,6 +255,7 @@ export const VideoUploader: React.FC = () => {
 
     const uploader = new ResumableUploader({
       file: selectedFile,
+      targetFolder: activeTargetFolder,
       onProgress: (info) => {
         setProgressInfo(info);
       },
@@ -108,10 +266,12 @@ export const VideoUploader: React.FC = () => {
     try {
       const result = await uploader.start();
       setUploadedVideo(result);
-      showToast('Upload Successful!', `"${selectedFile.name}" is now ready to share.`, 'success', 5000);
+      loadRecentUploads();
+      onUploadComplete?.(result);
+      showToast('Upload Successful!', `"${selectedFile.name}" is ready to share.`, 'success', 5000);
     } catch (err: any) {
       if (err.message !== 'Upload was cancelled.') {
-        showToast('Upload Error', err.message || 'Failed to upload video to Google Drive.', 'error', 6000);
+        showToast('Upload Error', err.message || 'Failed to upload to Google Drive.', 'error', 6000);
       }
     }
   };
@@ -129,12 +289,29 @@ export const VideoUploader: React.FC = () => {
     setProgressInfo(null);
     setUploaderInstance(null);
     setUploadedVideo(null);
+    loadRecentUploads();
   };
 
   const watchUrl = uploadedVideo ? qrService.getWatchUrl(uploadedVideo.id) : '';
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
+      {/* Target Folder Selector Dropdown */}
+      <div className="glass-panel p-3 px-4 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-900/60">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+          <Folder className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span>Upload Target Folder:</span>
+        </div>
+        <select
+          value={activeTargetFolder}
+          onChange={(e) => setActiveTargetFolder(e.target.value)}
+          className="bg-slate-800 text-xs font-bold text-indigo-200 px-3 py-1.5 rounded-xl border border-indigo-500/30 focus:outline-none focus:border-indigo-400 cursor-pointer shadow-sm"
+        >
+          <option value="BuildDrop_Uploads">BuildDrop_Uploads (Public User Storage)</option>
+          <option value="Private_BuildDrop_Uploads">Private_BuildDrop_Uploads (Private Storage)</option>
+        </select>
+      </div>
+
       {/* Upload Success State Screen */}
       {uploadedVideo ? (
         <div className="glass-card p-8 rounded-3xl border border-emerald-500/30 text-center relative overflow-hidden animate-fadeIn shadow-2xl">
@@ -152,7 +329,7 @@ export const VideoUploader: React.FC = () => {
             File Uploaded Successfully
           </h2>
           <p className="text-sm text-slate-300 max-w-lg mx-auto mb-6">
-            Your secure transfer link is ready to share. Anyone with this link can download the file.
+            Your encrypted transfer link is ready to share. Anyone with this link can view or download the file.
           </p>
 
           {/* Share URL Box */}
@@ -204,10 +381,11 @@ export const VideoUploader: React.FC = () => {
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${dragActive
+              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${
+                dragActive
                   ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]'
                   : 'border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/40'
-                }`}
+              }`}
             >
               <input
                 ref={fileInputRef}
@@ -235,8 +413,8 @@ export const VideoUploader: React.FC = () => {
                 <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-slate-300 border border-slate-700">
                   APK, ZIP, MP4, MKV, Any Format
                 </span>
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-slate-300 border border-slate-700">
-                  Folder: VidSetu_Uploads
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-800/90 text-indigo-300 border border-indigo-500/30">
+                  Target: {activeTargetFolder}
                 </span>
               </div>
             </div>
@@ -250,10 +428,14 @@ export const VideoUploader: React.FC = () => {
                   const isAndroidPkg = isAndroidPackageFile(selectedFile.name);
                   const isAppPkg = isIpa || isAndroidPkg || fileCategory === 'apk';
                   const appMeta = parseAppMetadataFromFilename(selectedFile.name);
-                  const cleanAppName = appMeta.cleanAppName || selectedFile.name;
+
+                  const displayName = parsedFileMeta?.appName || appMeta.cleanAppName || selectedFile.name;
+                  const displayBundleId = parsedFileMeta?.bundleId || `com.builddrop.${(displayName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+                  const displayVersion = parsedFileMeta?.bundleVersion || appMeta.version;
+                  const displayBuild = parsedFileMeta?.buildNumber || appMeta.buildNumber;
+
                   const platformLabel = isIpa ? 'iOS Build (.ipa)' : isAndroidPkg ? 'Android Package (.apk)' : 'App Package';
-                  const appInitials = (cleanAppName || 'App').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || 'APP';
-                  const estimatedBundleId = `com.builddrop.${(cleanAppName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+                  const appInitials = (displayName || 'App').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || 'APP';
 
                   return (
                     <>
@@ -271,6 +453,17 @@ export const VideoUploader: React.FC = () => {
                             alt={selectedFile.name}
                             className="w-full h-full object-contain"
                           />
+                        ) : parsedFileMeta?.appIcon ? (
+                          <div className="w-full h-full bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-950 p-4 flex flex-col items-center justify-center text-center">
+                            <img
+                              src={parsedFileMeta.appIcon}
+                              alt={displayName}
+                              className="w-16 h-16 object-contain rounded-2xl border border-white/10 shadow-xl mb-1.5 bg-black/40 p-1"
+                            />
+                            <span className="text-[10px] font-medium text-indigo-300">
+                              {platformLabel}
+                            </span>
+                          </div>
                         ) : isAppPkg ? (
                           <div className="w-full h-full bg-gradient-to-br from-indigo-950/80 via-purple-950/60 to-slate-950 p-4 flex flex-col items-center justify-center text-center select-none">
                             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 border border-white/20 shadow-xl flex items-center justify-center mb-2">
@@ -314,8 +507,8 @@ export const VideoUploader: React.FC = () => {
                         </div>
 
                         <div>
-                          <h3 className="text-xl font-bold text-white truncate" title={cleanAppName}>
-                            {cleanAppName}
+                          <h3 className="text-xl font-bold text-white truncate" title={displayName}>
+                            {displayName}
                           </h3>
                           <p className="font-mono text-xs text-slate-400 truncate mt-0.5" title={selectedFile.name}>
                             File: {selectedFile.name}
@@ -332,11 +525,13 @@ export const VideoUploader: React.FC = () => {
                             <>
                               <div className="min-w-0">
                                 <span className="text-slate-400 block text-[11px]">Version & Build:</span>
-                                <span className="font-semibold text-indigo-300">v{appMeta.version} (#{appMeta.buildNumber})</span>
+                                <span className="font-semibold text-indigo-300">v{displayVersion} (#{displayBuild})</span>
                               </div>
                               <div className="min-w-0 col-span-2 sm:col-span-1">
-                                <span className="text-slate-400 block text-[11px]">Estimated Bundle ID:</span>
-                                <span className="font-mono font-semibold text-slate-300 truncate block text-[11px]" title={estimatedBundleId}>{estimatedBundleId}</span>
+                                <span className="text-slate-400 block text-[11px]">
+                                  {parsedFileMeta?.bundleId ? 'Bundle ID:' : 'Estimated Bundle ID:'}
+                                </span>
+                                <span className="font-mono font-semibold text-slate-300 truncate block text-[11px]" title={displayBundleId}>{displayBundleId}</span>
                               </div>
                             </>
                           ) : (
@@ -350,7 +545,7 @@ export const VideoUploader: React.FC = () => {
 
                           <div className="min-w-0">
                             <span className="text-slate-400 block text-[11px]">Target Folder:</span>
-                            <span className="font-semibold text-indigo-300 truncate block">VidSetu_Uploads</span>
+                            <span className="font-semibold text-indigo-300 truncate block">{activeTargetFolder}</span>
                           </div>
                         </div>
                       </div>
@@ -391,6 +586,88 @@ export const VideoUploader: React.FC = () => {
             </div>
           )}
         </>
+      )}
+
+      {/* User's 3 Previous Builds Section */}
+      {recentUploads.length > 0 && (
+        <div className="glass-card p-6 rounded-3xl border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-base font-bold text-white">Your Recent Uploads (Last 3 Builds)</h3>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">{recentUploads.length} item(s)</span>
+          </div>
+
+          <div className="space-y-3">
+            {recentUploads.map((item) => {
+              const displayTitle = item.appName || item.originalFileName || item.name;
+              const displayVersionStr = item.bundleVersion ? `v${item.bundleVersion} (#${item.buildNumber || '1'})` : formatFileSize(item.size);
+
+              return (
+                <div
+                  key={item.id}
+                  className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-slate-700 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden p-1">
+                      {item.appIcon ? (
+                        <img src={item.appIcon} alt={displayTitle} className="w-full h-full object-contain rounded-xl" />
+                      ) : (
+                        <Smartphone className="w-6 h-6 text-indigo-400" />
+                      )}
+                    </div>
+
+                    <div className="min-w-0 space-y-0.5">
+                      <h4 className="text-sm font-bold text-white truncate max-w-xs" title={displayTitle}>
+                        {displayTitle}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span className="font-semibold text-indigo-300">{displayVersionStr}</span>
+                        <span>•</span>
+                        <span>{formatFileSize(item.size)}</span>
+                        <span>•</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+                          {item.uploadType === 'PRIVATE' ? 'Private Storage' : 'Public Storage'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions: Copy Share Link & Delete */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <button
+                      onClick={() => handleCopyRecentLink(item.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition-all"
+                      title="Copy Share Link"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </button>
+
+                    <a
+                      href={qrService.getWatchUrl(item.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
+                      title="View Share Page"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+
+                    <button
+                      onClick={() => handleDeleteRecent(item.id, item.name)}
+                      className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 transition-colors"
+                      title="Delete Build"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Info notice about direct browser upload and secure transfer */}

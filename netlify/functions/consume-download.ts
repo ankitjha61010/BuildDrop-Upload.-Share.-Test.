@@ -1,6 +1,5 @@
-// Runs server-side with the uploader's own Google OAuth refresh token so a link recipient (who
-// never signs into the uploader's Google account, and only ever holds public "reader" access)
-// can still trigger deletion of a one-time temporary upload after they download it.
+// Runs server-side with the uploader's own Google OAuth refresh token so a link recipient or admin
+// can delete a build file, along with its build folder, icon image, and empty parent user folder.
 import type { Config } from '@netlify/functions';
 import { getDriveAccessToken } from '../lib/googleDriveAuth';
 
@@ -32,12 +31,11 @@ export default async (req: Request) => {
   }
 
   const metaRes = await fetch(
-    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,trashed,properties,appProperties&supportsAllDrives=true`,
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,trashed,parents,properties,appProperties&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
 
   if (metaRes.status === 404) {
-    // Already gone - treat as success so a retry or a race with another delete doesn't error out.
     return Response.json({ success: true, alreadyDeleted: true });
   }
   if (!metaRes.ok) {
@@ -50,21 +48,81 @@ export default async (req: Request) => {
     return Response.json({ success: true, alreadyDeleted: true });
   }
 
-  // Only files explicitly marked as temporary one-time-download uploads (vidsetu_expires_at
-  // set by ResumableUploader) can ever be deleted through this public endpoint - this is what
-  // stops it being used to wipe permanent VidSetu_Videos library files.
-  if (!meta.properties?.vidsetu_expires_at && !meta.appProperties?.vidsetu_expires_at) {
-    return new Response('This file is not a temporary shared upload and cannot be auto-deleted', { status: 403 });
+  const props = { ...meta.appProperties, ...meta.properties };
+  
+  // Verify this is a BuildDrop managed build file
+  const isBuildDropFile = Boolean(
+    props.builddrop_upload_type ||
+    props.vidsetu_created_at ||
+    props.original_name ||
+    props.vidsetu_expires_at
+  );
+
+  if (!isBuildDropFile) {
+    return new Response('This file is not managed by BuildDrop and cannot be deleted', { status: 403 });
   }
 
-  const delRes = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const buildFolderId = props.builddrop_build_folder_id || meta.parents?.[0];
+  const userFolderId = props.builddrop_user_folder_id;
+  const appIconUrl = props.builddrop_app_icon;
 
-  if (!delRes.ok && delRes.status !== 404) {
-    console.error('Drive delete failed:', delRes.status, await delRes.text());
-    return new Response('Failed to delete file from Drive', { status: 502 });
+  let buildFolderDeleted = false;
+
+  // 1. Try deleting the entire build folder (contains build file & icon PNG)
+  if (buildFolderId) {
+    const folderDelRes = await fetch(`${DRIVE_API}/files/${encodeURIComponent(buildFolderId)}?supportsAllDrives=true`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (folderDelRes.ok || folderDelRes.status === 404) {
+      buildFolderDeleted = true;
+    }
+  }
+
+  // 2. Fallback: Delete main build file directly if folder delete didn't run
+  if (!buildFolderDeleted) {
+    const delRes = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!delRes.ok && delRes.status !== 404) {
+      console.error('Drive delete failed:', delRes.status, await delRes.text());
+      return new Response('Failed to delete file from Drive', { status: 502 });
+    }
+
+    // Delete associated icon file if present
+    if (appIconUrl && appIconUrl.includes('id=')) {
+      const iconId = appIconUrl.split('id=')[1]?.split('&')[0];
+      if (iconId) {
+        await fetch(`${DRIVE_API}/files/${encodeURIComponent(iconId)}?supportsAllDrives=true`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // 3. Check and clean up parent User Folder if it is now empty
+  if (userFolderId) {
+    try {
+      const checkRes = await fetch(
+        `${DRIVE_API}/files?q=${encodeURIComponent(`'${userFolderId}' in parents and trashed = false`)}&fields=files(id)&supportsAllDrives=true`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (!checkData.files || checkData.files.length === 0) {
+          console.log(`[Delete] User folder ${userFolderId} is now empty. Deleting empty user folder...`);
+          await fetch(`${DRIVE_API}/files/${encodeURIComponent(userFolderId)}?supportsAllDrives=true`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('User folder empty check warning:', e);
+    }
   }
 
   return Response.json({ success: true });

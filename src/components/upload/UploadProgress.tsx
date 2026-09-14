@@ -93,15 +93,14 @@ export const UploadProgress: React.FC<UploadProgressProps> = ({
       <div className="space-y-2 mb-4">
         <div className="w-full h-3.5 bg-slate-800/90 rounded-full overflow-hidden p-0.5 border border-slate-700/60 relative">
           <div
-            className={`h-full rounded-full transition-all duration-300 relative ${
-              status === 'failed'
-                ? 'bg-rose-500'
-                : status === 'completed'
+            className={`h-full rounded-full transition-all duration-300 relative ${status === 'failed'
+              ? 'bg-rose-500'
+              : status === 'completed'
                 ? 'bg-emerald-500'
                 : isPaused
-                ? 'bg-amber-500'
-                : 'bg-gradient-to-r from-indigo-500 via-indigo-400 to-sky-400 animate-pulse-subtle'
-            }`}
+                  ? 'bg-amber-500'
+                  : 'bg-gradient-to-r from-indigo-500 via-indigo-400 to-sky-400 animate-pulse-subtle'
+              }`}
             style={{ width: `${Math.max(progress, 3)}%` }}
           />
         </div>
@@ -152,7 +151,7 @@ export const UploadProgress: React.FC<UploadProgressProps> = ({
       {status === 'completed' && (
         <div className="mt-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>Chunked upload completed! Video ready in Google Drive.</span>
+          <span>Chunked upload completed! File ready</span>
         </div>
       )}
     </div>

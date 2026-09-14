@@ -13,7 +13,7 @@ export const getGoogleApiKey = (): string => {
 };
 
 export const getUploadsFolderName = (): string => {
-  return ((import.meta as any).env?.VITE_UPLOADS_FOLDER_NAME || 'VidSetu_Uploads').trim();
+  return ((import.meta as any).env?.VITE_UPLOADS_FOLDER_NAME || 'BuildDrop_Uploads').trim();
 };
 
 // A video counts as a temporary, one-time-download share (rather than a permanent library
@@ -137,12 +137,30 @@ export class DriveApiService {
     const localCache = this.getLocalMetadataCache();
     const fallbackLocal = localCache[file.id] || {};
 
-    const hasExplicitExpiration = Boolean(appProps.vidsetu_expires_at || fallbackLocal.expiresAt);
+    const uploadType = (appProps.builddrop_upload_type || (appProps.folderName === 'Private_BuildDrop_Uploads' ? 'PRIVATE' : 'NORMAL')) as 'NORMAL' | 'PRIVATE';
+    const isPrivate = uploadType === 'PRIVATE';
+
+    const hasExplicitExpiration = !isPrivate && Boolean(appProps.vidsetu_expires_at || fallbackLocal.expiresAt);
     const createdAt = parseInt(appProps.vidsetu_created_at || fallbackLocal.createdAt || new Date(file.createdTime || Date.now()).getTime(), 10);
     const expiresAt = hasExplicitExpiration
       ? parseInt(appProps.vidsetu_expires_at || fallbackLocal.expiresAt, 10)
       : (createdAt + 10 * 365 * 24 * 60 * 60 * 1000);
-    const isExpired = hasExplicitExpiration && Date.now() > expiresAt;
+    const isExpired = !isPrivate && hasExplicitExpiration && Date.now() > expiresAt;
+
+    let rawAppIcon = appProps.builddrop_app_icon || fallbackLocal.appIcon;
+    if (rawAppIcon && !rawAppIcon.startsWith('data:image/')) {
+      let iconFileId: string | null = null;
+      if (rawAppIcon.includes('/d/')) {
+        iconFileId = rawAppIcon.split('/d/')[1]?.split('/')[0]?.split('?')[0] || null;
+      } else if (rawAppIcon.includes('id=')) {
+        iconFileId = rawAppIcon.split('id=')[1]?.split('&')[0] || null;
+      } else if (/^[a-zA-Z0-9_-]{20,}$/.test(rawAppIcon.trim())) {
+        iconFileId = rawAppIcon.trim();
+      }
+      if (iconFileId) {
+        rawAppIcon = `/api/download-file?id=${iconFileId}&inline=1`;
+      }
+    }
 
     const meta: VideoMetadata = {
       id: file.id,
@@ -154,6 +172,7 @@ export class DriveApiService {
       createdAt,
       expiresAt,
       isExpired,
+      uploadType,
       thumbnailLink: file.thumbnailLink,
       webContentLink: file.webContentLink || `https://drive.google.com/uc?export=download&id=${file.id}`,
       webViewLink: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
@@ -162,7 +181,7 @@ export class DriveApiService {
       bundleId: appProps.builddrop_bundle_id || fallbackLocal.bundleId,
       bundleVersion: appProps.builddrop_bundle_version || fallbackLocal.bundleVersion,
       buildNumber: appProps.builddrop_build_number || fallbackLocal.buildNumber || '1',
-      appIcon: appProps.builddrop_app_icon || fallbackLocal.appIcon,
+      appIcon: rawAppIcon,
     };
 
     this.cacheVideoMetadata(meta);

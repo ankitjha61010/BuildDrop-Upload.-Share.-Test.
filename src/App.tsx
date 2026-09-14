@@ -10,6 +10,8 @@ import { NotFoundPage } from './pages/NotFoundPage';
 
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { TermsPage } from './pages/TermsPage';
+import { AdminListPage } from './pages/AdminListPage';
+import { AdminLoginPage } from './pages/AdminLoginPage';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -66,6 +68,8 @@ export const App: React.FC = () => {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/upload" element={<Navigate to="/#uploader" replace />} />
                 <Route path="/watch/:videoId" element={<WatchPage />} />
+                <Route path="/admin/list" element={<AdminListPage />} />
+                <Route path="/admin/login" element={<AdminLoginPage />} />
                 <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
                 <Route path="/terms" element={<TermsPage />} />
                 <Route path="/404" element={<NotFoundPage />} />

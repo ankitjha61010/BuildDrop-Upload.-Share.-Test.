@@ -5,6 +5,7 @@ import { driveApi, getDirectDownloadUrl } from '../services/driveApi';
 import { useToast } from '../context/ToastContext';
 import { expirationService } from '../services/expirationService';
 import { qrService } from '../services/qrService';
+import { decodeFileId } from '../utils/urlSecurity';
 import { VideoPlayer } from '../components/player/VideoPlayer';
 import { ExpiredVideo } from '../components/player/ExpiredVideo';
 import { LoadingState } from '../components/common/LoadingState';
@@ -25,6 +26,7 @@ import {
   Hash,
   RefreshCw,
   Trash2,
+  Archive,
 } from 'lucide-react';
 
 export const WatchPage: React.FC = () => {
@@ -45,12 +47,26 @@ export const WatchPage: React.FC = () => {
       return;
     }
 
+    const realFileId = decodeFileId(videoId);
+
     const loadVideo = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const meta = await driveApi.getVideoMetadata(videoId);
+        const meta = await driveApi.getVideoMetadata(realFileId);
         setVideo(meta);
+
+        // If appIcon is missing, re-check metadata after 2.5s in case background extraction was processing
+        if (!meta.appIcon) {
+          setTimeout(async () => {
+            try {
+              const freshMeta = await driveApi.getVideoMetadata(realFileId);
+              if (freshMeta.appIcon) {
+                setVideo(freshMeta);
+              }
+            } catch {}
+          }, 2500);
+        }
 
         // Check expiration
         const timeCheck = expirationService.getTimeRemaining(meta.expiresAt);
@@ -104,6 +120,7 @@ export const WatchPage: React.FC = () => {
   const isVideoFile = isVideoFileType(fileName, video.mimeType);
   const fileIsIpa = isIpaFile(fileName);
   const fileIsAndroidPackage = isAndroidPackageFile(fileName);
+  const isAppPackage = fileIsIpa || fileIsAndroidPackage;
   const visitorIsIOS = isIOS();
   const manifestUrl = `${window.location.origin}/api/ipa-manifest?id=${encodeURIComponent(video.driveFileId)}`;
   const itmsInstallUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
@@ -111,10 +128,15 @@ export const WatchPage: React.FC = () => {
   // Formatted Metadata
   const parsedMeta = parseAppMetadataFromFilename(fileName);
   const cleanAppName = video.appName || parsedMeta.cleanAppName;
-  const bundleId = video.bundleId || (fileIsIpa ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : fileIsAndroidPackage ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : 'com.builddrop.app');
+  const bundleId = video.bundleId || (fileIsIpa ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : fileIsAndroidPackage ? `com.builddrop.${video.id.slice(0, 10).toLowerCase()}` : 'com.builddrop.file');
   const bundleVersion = video.bundleVersion || parsedMeta.version;
   const buildNumber = video.buildNumber || parsedMeta.buildNumber;
-  const platformName = fileIsIpa ? 'iOS' : fileIsAndroidPackage ? 'Android' : 'build';
+
+  const headerSubtext = fileIsIpa
+    ? 'Your iOS build is ready to be shared and installed.'
+    : fileIsAndroidPackage
+    ? 'Your Android build is ready to be shared and installed.'
+    : 'Your file is ready to be shared and downloaded.';
 
   // Manual Delete File handler
   const handleDeleteFile = async () => {
@@ -140,7 +162,7 @@ export const WatchPage: React.FC = () => {
       setIsDownloading(true);
       const downloadUrl = getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name);
       window.location.href = downloadUrl;
-      showToast('Download Started', 'Your build file download has started.', 'success');
+      showToast('Download Started', 'Your file download has started.', 'success');
     } catch (e: any) {
       console.error('Download trigger error:', e);
       showToast('Download Failed', e?.message || 'Unable to download file.', 'error', 8000);
@@ -177,31 +199,33 @@ export const WatchPage: React.FC = () => {
               Upload Successful!
             </h1>
             <p className="text-slate-400 text-sm sm:text-base max-w-md mx-auto">
-              Your {platformName} build is ready to be shared and installed.
+              {headerSubtext}
             </p>
           </div>
 
           {/* App Build Details Card */}
           <div className="bg-[#121622]/90 border border-slate-800/90 rounded-2xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl max-w-2xl mx-auto">
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 sm:gap-6 text-center sm:text-left">
-              {/* App Icon */}
+              {/* App Icon / File Icon */}
               <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-purple-600 via-indigo-600 to-slate-900 border border-white/10 shadow-xl flex flex-col items-center justify-center text-white shrink-0 relative overflow-hidden group">
                 {video.appIcon ? (
                   <img
                     src={video.appIcon}
                     alt={cleanAppName}
-                    className="w-full h-full object-cover rounded-2xl p-1 bg-slate-950/40"
+                    className="w-full h-full object-contain rounded-2xl relative z-10"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
                   />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-indigo-500 via-purple-600 to-slate-900 flex flex-col items-center justify-center p-2 text-center select-none">
-                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-1 shadow-inner">
-                      <Smartphone className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="text-[10px] font-extrabold tracking-widest uppercase text-white/90 truncate max-w-[80px] px-1">
-                      {(cleanAppName || 'Build').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || (cleanAppName || 'Build').slice(0, 4)}
-                    </span>
+                ) : null}
+                <div className="w-full h-full bg-gradient-to-br from-indigo-500 via-purple-600 to-slate-900 flex flex-col items-center justify-center p-2 text-center select-none absolute inset-0">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-1 shadow-inner">
+                    {isAppPackage ? <Smartphone className="w-5 h-5 text-white" /> : <Archive className="w-5 h-5 text-white" />}
                   </div>
-                )}
+                  <span className="text-[10px] font-extrabold tracking-widest uppercase text-white/90 truncate max-w-[80px] px-1">
+                    {(cleanAppName || 'File').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || (cleanAppName || 'File').slice(0, 4)}
+                  </span>
+                </div>
               </div>
 
               {/* Title & App Metadata */}
@@ -217,17 +241,21 @@ export const WatchPage: React.FC = () => {
 
                 {/* Stats Row */}
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6 pt-1 text-xs text-slate-300 font-medium">
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-slate-400" />
-                    <span className="text-slate-400">Version</span>
-                    <span className="font-semibold text-slate-100">{bundleVersion}</span>
-                  </div>
+                  {isAppPackage && (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <Layers className="w-4 h-4 text-slate-400" />
+                        <span className="text-slate-400">Version</span>
+                        <span className="font-semibold text-slate-100">{bundleVersion}</span>
+                      </div>
 
-                  <div className="flex items-center gap-1.5">
-                    <Hash className="w-4 h-4 text-slate-400" />
-                    <span className="text-slate-400">Build</span>
-                    <span className="font-semibold text-slate-100">{buildNumber}</span>
-                  </div>
+                      <div className="flex items-center gap-1.5">
+                        <Hash className="w-4 h-4 text-slate-400" />
+                        <span className="text-slate-400">Build</span>
+                        <span className="font-semibold text-slate-100">{buildNumber}</span>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex items-center gap-1.5">
                     <HardDrive className="w-4 h-4 text-slate-400" />
@@ -245,7 +273,7 @@ export const WatchPage: React.FC = () => {
               {/* Scan to install column */}
               <div className="flex flex-col items-center shrink-0">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                  Scan to install
+                  {isAppPackage ? 'Scan to install' : 'Scan to download'}
                 </span>
                 <div className="p-3.5 bg-white rounded-2xl border border-slate-200 shadow-xl flex items-center justify-center">
                   <QRCodeSVG
@@ -273,15 +301,6 @@ export const WatchPage: React.FC = () => {
                 </div>
 
                 {/* Info prompts for platform compatibility */}
-                {/* {fileIsIpa && visitorIsIOS && (
-                  <div className="text-[11px] sm:text-xs text-slate-300 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 flex items-start gap-2 text-left">
-                    <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>iOS Installation Notice:</strong> After tapping Install, return to home screen. If iOS shows "Unable to Verify", go to <strong>Settings → General → VPN & Device Management</strong> and tap <strong>Trust Certificate</strong>.
-                    </span>
-                  </div>
-                )} */}
-
                 {fileIsIpa && !visitorIsIOS && (
                   <div className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/60 rounded-xl p-3 flex items-start gap-2 text-left">
                     <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
@@ -296,23 +315,62 @@ export const WatchPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Primary Action Button - Lime Green */}
+                {/* Download / Install Buttons */}
                 {fileIsIpa && visitorIsIOS ? (
-                  <a
-                    href={itmsInstallUrl}
-                    className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer"
-                  >
-                    <Smartphone className="w-5 h-5" />
-                    <span>Install on Device</span>
-                  </a>
+                  <>
+                    <a
+                      href={itmsInstallUrl}
+                      className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer"
+                    >
+                      <Smartphone className="w-5 h-5" />
+                      <span>Install on Device</span>
+                    </a>
+                    <button
+                      onClick={handleDownloadFile}
+                      disabled={isDownloading}
+                      className="w-full py-3 px-6 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4 text-indigo-400" />
+                      <span>Download .ipa Build ({formatFileSize(video.size)})</span>
+                    </button>
+                  </>
+                ) : isAppPackage ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (fileIsIpa) {
+                          showToast('iOS Device Required', 'Over-The-Air (OTA) installation requires Safari on an iPhone/iPad. Downloading .ipa file instead.', 'info', 5000);
+                        }
+                        handleDownloadFile();
+                      }}
+                      disabled={isDownloading}
+                      className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>Starting Download...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Smartphone className="w-5 h-5" />
+                          <span>{fileIsIpa ? 'Download .ipa Build' : 'Download Android Build'}</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={handleDownloadFile}
+                      disabled={isDownloading}
+                      className="w-full py-3 px-6 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Download className="w-4 h-4 text-indigo-400" />
+                      <span>Download Build File ({formatFileSize(video.size)})</span>
+                    </button>
+                  </>
                 ) : (
+                  /* Generic File (ZIP, RAR, PDF, etc) - single primary Download button */
                   <button
-                    onClick={() => {
-                      if (fileIsIpa) {
-                        showToast('iOS Device Required', 'Over-The-Air (OTA) installation requires Safari on an iPhone/iPad. Downloading .ipa file instead.', 'info', 5000);
-                      }
-                      handleDownloadFile();
-                    }}
+                    onClick={handleDownloadFile}
                     disabled={isDownloading}
                     className="w-full py-3.5 px-6 rounded-xl bg-[#84cc16] hover:bg-[#74b810] active:scale-[0.99] text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-lime-500/20 transition-all cursor-pointer disabled:opacity-60"
                   >
@@ -323,22 +381,12 @@ export const WatchPage: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <Smartphone className="w-5 h-5" />
-                        <span>{fileIsIpa ? 'Download .ipa Build' : 'Install / Download Build'}</span>
+                        <Download className="w-5 h-5" />
+                        <span>Download File ({formatFileSize(video.size)})</span>
                       </>
                     )}
                   </button>
                 )}
-
-                {/* Dedicated Download File Button */}
-                <button
-                  onClick={handleDownloadFile}
-                  disabled={isDownloading}
-                  className="w-full py-3 px-6 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-100 font-semibold text-sm flex items-center justify-center gap-2 border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4 text-indigo-400" />
-                  <span>Download Build File ({formatFileSize(video.size)})</span>
-                </button>
 
                 {/* Secondary Action - Upload Another Build & Delete */}
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-800/80">

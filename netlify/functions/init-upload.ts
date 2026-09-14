@@ -11,18 +11,21 @@ const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const MAX_FILE_SIZE_BYTES = 12 * 1024 * 1024 * 1024; // 12 GB
 const EXPIRATION_DURATION_MS = 12 * 24 * 60 * 60 * 1000; // 12 days
 
-function getUploadsFolderName(): string {
-  return (process.env.VITE_UPLOADS_FOLDER_NAME || 'VidSetu_Uploads').trim();
+function getUploadsFolderName(requestedName?: string): string {
+  if (requestedName === 'Private_BuildDrop_Uploads' || requestedName === 'BuildDrop_Uploads') {
+    return requestedName;
+  }
+  return (process.env.VITE_UPLOADS_FOLDER_NAME || 'BuildDrop_Uploads').trim();
 }
 
-// Finds (or creates) the shared uploads folder in the owner's own Drive. A fixed
-// DRIVE_UPLOADS_FOLDER_ID env var skips the lookup entirely; otherwise it's found/created by
-// name, same as the folder the client used to resolve for itself before it had its own login.
-async function resolveUploadsFolderId(token: string): Promise<string> {
-  const fixedId = (process.env.DRIVE_UPLOADS_FOLDER_ID || '').trim();
-  if (fixedId) return fixedId;
+// Finds (or creates) the target shared uploads folder in the owner's own Drive.
+async function resolveUploadsFolderId(token: string, targetFolderName?: string): Promise<string> {
+  const folderName = getUploadsFolderName(targetFolderName);
 
-  const folderName = getUploadsFolderName();
+  // If requesting standard folder and DRIVE_UPLOADS_FOLDER_ID is set, use fixed ID
+  const fixedId = (process.env.DRIVE_UPLOADS_FOLDER_ID || '').trim();
+  if (fixedId && folderName === getUploadsFolderName()) return fixedId;
+
   const q = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const searchRes = await fetch(
     `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&supportsAllDrives=true&includeItemsFromAllDrives=true`,
@@ -39,14 +42,89 @@ async function resolveUploadsFolderId(token: string): Promise<string> {
     body: JSON.stringify({
       name: folderName,
       mimeType: 'application/vnd.google-apps.folder',
-      description: 'VidSetu shared uploads storage folder',
+      description: `BuildDrop shared storage folder (${folderName})`,
     }),
   });
   if (!createRes.ok) {
-    throw new Error(`Failed to create uploads folder: ${createRes.status} ${await createRes.text()}`);
+    throw new Error(`Failed to create uploads folder "${folderName}": ${createRes.status} ${await createRes.text()}`);
   }
   const created = await createRes.json();
   return created.id;
+}
+
+// Helper to find or create a subfolder inside a parent folder
+async function findOrCreateSubfolder(token: string, parentFolderId: string, folderName: string): Promise<string> {
+  const q = `'${parentFolderId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const searchRes = await fetch(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (searchRes.ok) {
+    const data = await searchRes.json();
+    if (data.files?.length > 0) return data.files[0].id;
+  }
+
+  const createRes = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentFolderId],
+    }),
+  });
+  if (!createRes.ok) {
+    throw new Error(`Failed to create subfolder "${folderName}": ${createRes.status} ${await createRes.text()}`);
+  }
+  const created = await createRes.json();
+  return created.id;
+}
+
+// Upload base64 image data directly into the build folder in Drive
+async function uploadBase64IconToDrive(token: string, buildFolderId: string, base64Data: string): Promise<string | undefined> {
+  try {
+    const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) return undefined;
+
+    const buffer = Buffer.from(match[2], 'base64');
+    const iconFileName = `icon_${Date.now()}.png`;
+
+    const createRes = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: iconFileName,
+        mimeType: 'image/png',
+        parents: [buildFolderId],
+        description: `BuildDrop App Icon`,
+      }),
+    });
+
+    if (!createRes.ok) return undefined;
+    const created = await createRes.json();
+    const iconFileId = created.id;
+
+    await fetch(
+      `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(iconFileId)}?uploadType=media&supportsAllDrives=true`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png' },
+        body: buffer,
+      }
+    );
+
+    // Make icon file publicly readable
+    await fetch(`${DRIVE_API}/files/${encodeURIComponent(iconFileId)}/permissions?supportsAllDrives=true`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    }).catch(() => { });
+
+    return `https://lh3.googleusercontent.com/d/${iconFileId}`;
+  } catch (err) {
+    console.error('Failed to upload base64 icon to Drive:', err);
+    return undefined;
+  }
 }
 
 export default async (req: Request) => {
@@ -54,7 +132,7 @@ export default async (req: Request) => {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  let fileName: unknown, mimeType: unknown, fileSize: unknown, appName: unknown, bundleId: unknown, bundleVersion: unknown, buildNumber: unknown, appIcon: unknown;
+  let fileName: unknown, mimeType: unknown, fileSize: unknown, appName: unknown, bundleId: unknown, bundleVersion: unknown, buildNumber: unknown, appIcon: unknown, targetFolder: unknown, userId: unknown;
   try {
     const body = await req.json();
     fileName = body?.fileName;
@@ -65,6 +143,8 @@ export default async (req: Request) => {
     bundleVersion = body?.bundleVersion;
     buildNumber = body?.buildNumber;
     appIcon = body?.appIcon;
+    targetFolder = body?.targetFolder;
+    userId = body?.userId;
   } catch {
     return new Response('Invalid JSON body', { status: 400 });
   }
@@ -87,33 +167,67 @@ export default async (req: Request) => {
     return new Response('Server not configured', { status: 500 });
   }
 
-  let folderId: string;
+  let rootFolderId: string;
   try {
-    folderId = await resolveUploadsFolderId(token);
+    rootFolderId = await resolveUploadsFolderId(token, typeof targetFolder === 'string' ? targetFolder : undefined);
   } catch (err: any) {
     console.error('Failed to resolve uploads folder:', err);
     return new Response('Failed to prepare storage folder', { status: 502 });
   }
 
+  // Create nested user subfolder & build subfolder structure:
+  // BuildDrop_Uploads / {userId} / {buildId} /
+  const resolvedUserId = (typeof userId === 'string' && userId.trim()) ? userId.trim() : 'user_default';
+  let buildFolderId: string;
+  let userFolderId: string;
+  try {
+    userFolderId = await findOrCreateSubfolder(token, rootFolderId, resolvedUserId);
+    const buildFolderName = `build_${Date.now()}`;
+    buildFolderId = await findOrCreateSubfolder(token, userFolderId, buildFolderName);
+  } catch (err: any) {
+    console.error('Failed to create subfolders for upload:', err);
+    return new Response('Failed to prepare nested build folder', { status: 502 });
+  }
+
   const createdAt = Date.now();
   const expiresAt = createdAt + EXPIRATION_DURATION_MS;
   const resolvedMimeType = typeof mimeType === 'string' && mimeType ? mimeType : 'application/octet-stream';
+  const uploadTypeStr = targetFolder === 'Private_BuildDrop_Uploads' ? 'PRIVATE' : 'NORMAL';
 
   const propertiesRecord: Record<string, string> = {
     vidsetu_created_at: createdAt.toString(),
-    vidsetu_expires_at: expiresAt.toString(),
     original_name: fileName,
+    builddrop_upload_type: uploadTypeStr,
+    builddrop_user_folder_id: userFolderId,
+    builddrop_build_folder_id: buildFolderId,
   };
+
+  // Only set 12-day expiration timestamp if the upload is NORMAL
+  if (uploadTypeStr === 'NORMAL') {
+    propertiesRecord.vidsetu_expires_at = expiresAt.toString();
+  }
+
   if (typeof appName === 'string' && appName) propertiesRecord.builddrop_app_name = appName.slice(0, 100);
   if (typeof bundleId === 'string' && bundleId) propertiesRecord.builddrop_bundle_id = bundleId.slice(0, 100);
   if (typeof bundleVersion === 'string' && bundleVersion) propertiesRecord.builddrop_bundle_version = bundleVersion.slice(0, 50);
   if (typeof buildNumber === 'string' && buildNumber) propertiesRecord.builddrop_build_number = buildNumber.slice(0, 50);
-  if (typeof appIcon === 'string' && appIcon && appIcon.length <= 120) propertiesRecord.builddrop_app_icon = appIcon;
+
+  // Handle app icon storage inside the build subfolder
+  if (typeof appIcon === 'string' && appIcon) {
+    if (appIcon.startsWith('data:image/')) {
+      const uploadedIconUrl = await uploadBase64IconToDrive(token, buildFolderId, appIcon);
+      if (uploadedIconUrl) {
+        propertiesRecord.builddrop_app_icon = uploadedIconUrl;
+      }
+    } else if (appIcon.length <= 120) {
+      propertiesRecord.builddrop_app_icon = appIcon;
+    }
+  }
 
   const metadata = {
     name: fileName,
     mimeType: resolvedMimeType,
-    parents: [folderId],
+    parents: [buildFolderId],
     description: `Uploaded via BuildDrop. Expires at ${new Date(expiresAt).toISOString()}`,
     properties: propertiesRecord,
   };
@@ -149,3 +263,4 @@ export default async (req: Request) => {
 export const config: Config = {
   path: '/api/init-upload',
 };
+

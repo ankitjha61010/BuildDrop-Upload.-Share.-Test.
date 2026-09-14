@@ -110,7 +110,7 @@ export function parseAppMetadataFromFilename(fileName: string): {
 
   // Look for version pattern like 1.3.4, v1.3.4, 1.2, 2.0.1
   const versionMatch = baseName.match(/(?:[._-]v?|v)(\d+\.\d+(?:\.\d+)?)/i) || baseName.match(/(\d+\.\d+\.\d+)/);
-  const version = versionMatch ? versionMatch[1] : '1.3.4';
+  const version = versionMatch ? versionMatch[1] : '1.0.0';
 
   // Look for build number pattern like -b1, _b12, build1, #1
   const buildMatch = baseName.match(/(?:build|b|#)[._-]?(\d+)/i);

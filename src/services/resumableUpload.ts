@@ -1,6 +1,7 @@
 import { driveApi, fetchJson } from './driveApi';
 import { UploadProgressInfo, VideoMetadata, UploadStatus } from '../types';
 import { TransferSpeedTracker } from '../utils/transferSpeed';
+import { getOrCreateUserId } from '../utils/userId';
 
 export const MAX_FILE_SIZE_BYTES = 12 * 1024 * 1024 * 1024; // 12 GB exactly
 export const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB chunk size for high performance large file upload
@@ -9,11 +10,13 @@ export const EXPIRATION_DURATION_MS = 12 * 24 * 60 * 60 * 1000; // 12 Days (288 
 export interface ResumableUploadOptions {
   file: File;
   onProgress?: (progress: UploadProgressInfo) => void;
+  targetFolder?: string;
 }
 
 export class ResumableUploader {
   private file: File;
   private onProgress?: (progress: UploadProgressInfo) => void;
+  private targetFolder?: string;
   private uploadUrl: string | null = null;
   private isPaused: boolean = false;
   private isCancelled: boolean = false;
@@ -26,6 +29,7 @@ export class ResumableUploader {
   constructor(options: ResumableUploadOptions) {
     this.file = options.file;
     this.onProgress = options.onProgress;
+    this.targetFolder = options.targetFolder;
   }
 
   public validateFile(): { valid: boolean; error?: string } {
@@ -57,9 +61,11 @@ export class ResumableUploader {
     // Extract app logo, name, bundleId, version, buildNumber client-side
     if (/\.(ipa|apk)$/i.test(this.file.name)) {
       try {
-        const AppInfoParserModule = (await import('app-info-parser')).default;
-        const parser = new AppInfoParserModule(this.file);
-        const info: any = await parser.parse();
+        const parserModule = await import('app-info-parser/dist/app-info-parser.js');
+        const AppInfoParserModule = parserModule.default || (parserModule as any).AppInfoParser || (window as any).AppInfoParser;
+        if (AppInfoParserModule) {
+          const parser = new AppInfoParserModule(this.file);
+          const info: any = await parser.parse();
 
         let rawAppName = info.CFBundleDisplayName || info.CFBundleName || info.application?.label;
         if (Array.isArray(rawAppName)) rawAppName = rawAppName[0];
@@ -68,19 +74,102 @@ export class ResumableUploader {
         const bundleId = info.CFBundleIdentifier || info.package;
         const bundleVersion = info.CFBundleShortVersionString || info.versionName || info.CFBundleVersion;
         const buildNumber = info.CFBundleVersion || (info.versionCode ? info.versionCode.toString() : undefined);
-        const appIcon = typeof info.icon === 'string' ? info.icon : undefined;
+        
+        let appIconData: string | undefined = undefined;
 
-        this.extractedMeta = {
-          appName: typeof rawAppName === 'string' ? rawAppName : undefined,
-          bundleId,
-          bundleVersion,
-          buildNumber,
-          appIcon,
-        };
+        const densityRegexes = [
+          /mipmap-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+          /mipmap-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+          /drawable-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+          /drawable-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+          /mipmap-xxxhdpi.*\.(png|webp)$/i,
+          /mipmap-xxhdpi.*\.(png|webp)$/i,
+          /drawable-xxxhdpi.*\.(png|webp)$/i,
+          /drawable-xxhdpi.*\.(png|webp)$/i,
+          /mipmap-xhdpi.*ic_launcher.*\.(png|webp)$/i,
+          /mipmap-hdpi.*ic_launcher.*\.(png|webp)$/i,
+          /AppIcon.*60x60@3x\.png$/i,
+          /AppIcon.*60x60@2x\.png$/i,
+        ];
+
+        if (typeof (parser as any).getEntry === 'function') {
+          for (const regex of densityRegexes) {
+            try {
+              const iconBuffer = await (parser as any).getEntry(regex);
+              if (iconBuffer && iconBuffer.length > 0) {
+                const base64 = Buffer.from(iconBuffer).toString('base64');
+                appIconData = `data:image/png;base64,${base64}`;
+                break;
+              }
+            } catch {}
+          }
+        }
+
+        if (!appIconData) {
+          let rawIconPaths: any = info?.application?.icon || info?.icon;
+          if (rawIconPaths && !Array.isArray(rawIconPaths) && typeof rawIconPaths === 'object') {
+            rawIconPaths = Object.values(rawIconPaths);
+          }
+
+          if (Array.isArray(rawIconPaths)) {
+            const pngPaths: string[] = rawIconPaths
+              .map((p: any) => (typeof p === 'string' ? p : p?.path || ''))
+              .filter((p: string) => typeof p === 'string' && /\.(png|webp)$/i.test(p));
+
+            const scorePath = (p: string) => {
+              let score = 0;
+              const lower = p.toLowerCase();
+              if (lower.includes('xxxhdpi') || lower.includes('512') || lower.includes('192')) score += 50;
+              else if (lower.includes('xxhdpi') || lower.includes('144')) score += 40;
+              else if (lower.includes('xhdpi') || lower.includes('96')) score += 30;
+              else if (lower.includes('hdpi') || lower.includes('72')) score += 20;
+
+              if (lower.includes('ic_launcher') || lower.includes('app_icon')) score += 15;
+              if (lower.includes('foreground') || lower.includes('background')) score -= 5;
+              return score;
+            };
+
+            pngPaths.sort((a, b) => scorePath(b) - scorePath(a));
+
+            for (const candidatePath of pngPaths) {
+              if (typeof (parser as any).getEntry === 'function') {
+                try {
+                  const iconBuffer = await (parser as any).getEntry(candidatePath);
+                  if (iconBuffer && iconBuffer.length > 0) {
+                    const base64 = Buffer.from(iconBuffer).toString('base64');
+                    appIconData = `data:image/png;base64,${base64}`;
+                    break;
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+
+        if (!appIconData) {
+          let rawIcon = info.icon;
+          if (rawIcon && typeof rawIcon.then === 'function') {
+            rawIcon = await rawIcon;
+          }
+          if (typeof rawIcon === 'string' && rawIcon.startsWith('data:image/')) {
+            appIconData = rawIcon;
+          }
+        }
+
+          this.extractedMeta = {
+            appName: typeof rawAppName === 'string' ? rawAppName : undefined,
+            bundleId,
+            bundleVersion,
+            buildNumber,
+            appIcon: appIconData,
+          };
+        }
       } catch (err) {
         console.warn('Browser app info extraction info:', err);
       }
     }
+
+    const userId = getOrCreateUserId();
 
     // Step 1: Ask our server to open a resumable session with Drive using the site owner's own credentials
     const { uploadUrl } = await fetchJson<{ uploadUrl?: string }>(
@@ -97,6 +186,8 @@ export class ResumableUploader {
           bundleVersion: this.extractedMeta.bundleVersion,
           buildNumber: this.extractedMeta.buildNumber,
           appIcon: this.extractedMeta.appIcon,
+          targetFolder: this.targetFolder,
+          userId,
         }),
       },
       'Starting the upload'
@@ -208,15 +299,36 @@ export class ResumableUploader {
       'Making the upload shareable'
     );
 
+    let extractedIconUrl: string | undefined = undefined;
     if (/\.(ipa|apk)$/i.test(this.file.name)) {
-      fetch('/api/extract-ipa-metadata', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: fileData.id }),
-      }).catch(() => {});
+      try {
+        const extractRes = await fetchJson<any>(
+          '/api/extract-ipa-metadata',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId: fileData.id }),
+          },
+          'Extracting app metadata'
+        );
+        if (extractRes?.appIconUrl) {
+          extractedIconUrl = extractRes.appIconUrl;
+        }
+      } catch (err) {
+        console.warn('IPA/APK metadata extraction warning:', err);
+      }
     }
 
     const appProps = { ...fileData.appProperties, ...fileData.properties };
+
+    const rawIcon = extractedIconUrl || appProps.builddrop_app_icon || this.extractedMeta.appIcon;
+    let finalIcon = rawIcon;
+    if (finalIcon && finalIcon.includes('id=')) {
+      const iconId = finalIcon.split('id=')[1]?.split('&')[0];
+      if (iconId) {
+        finalIcon = `/api/download-file?id=${iconId}&inline=1`;
+      }
+    }
 
     const videoMeta: VideoMetadata = {
       id: fileData.id,
@@ -236,7 +348,7 @@ export class ResumableUploader {
       bundleId: appProps.builddrop_bundle_id || this.extractedMeta.bundleId,
       bundleVersion: appProps.builddrop_bundle_version || this.extractedMeta.bundleVersion,
       buildNumber: appProps.builddrop_build_number || this.extractedMeta.buildNumber || '1',
-      appIcon: appProps.builddrop_app_icon || this.extractedMeta.appIcon,
+      appIcon: finalIcon,
     };
 
     driveApi.cacheVideoMetadata(videoMeta);

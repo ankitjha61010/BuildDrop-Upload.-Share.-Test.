@@ -16,7 +16,7 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const MAX_EXTRACT_BYTES = 150 * 1024 * 1024;
 
-async function uploadIconImageToDrive(token: string, fileId: string, base64Data: string): Promise<string | undefined> {
+async function uploadIconImageToDrive(token: string, fileId: string, base64Data: string, buildFolderId?: string): Promise<string | undefined> {
   try {
     const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
     if (!match) return undefined;
@@ -24,15 +24,20 @@ async function uploadIconImageToDrive(token: string, fileId: string, base64Data:
     const buffer = Buffer.from(match[2], 'base64');
     const iconFileName = `icon_${fileId}.png`;
 
+    const metadata: Record<string, any> = {
+      name: iconFileName,
+      mimeType: 'image/png',
+      description: `BuildDrop App Icon for file ${fileId}`,
+    };
+    if (buildFolderId) {
+      metadata.parents = [buildFolderId];
+    }
+
     // 1. Create file resource metadata
     const createRes = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: iconFileName,
-        mimeType: 'image/png',
-        description: `BuildDrop App Icon for file ${fileId}`,
-      }),
+      body: JSON.stringify(metadata),
     });
 
     if (!createRes.ok) {
@@ -64,7 +69,7 @@ async function uploadIconImageToDrive(token: string, fileId: string, base64Data:
       body: JSON.stringify({ role: 'reader', type: 'anyone' }),
     }).catch(() => {});
 
-    return `https://drive.google.com/uc?export=view&id=${iconFileId}`;
+    return `https://lh3.googleusercontent.com/d/${iconFileId}`;
   } catch (err) {
     console.error('Error in uploadIconImageToDrive:', err);
     return undefined;
@@ -96,25 +101,33 @@ export default async (req: Request) => {
   }
 
   const metaRes = await fetch(
-    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=size&supportsAllDrives=true`,
+    `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=size,parents,properties,appProperties&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!metaRes.ok) {
     return Response.json({ success: false, reason: 'not_found' });
   }
-  const { size } = await metaRes.json();
+  const fileMeta = await metaRes.json();
+  const size = fileMeta.size;
+  const props = { ...fileMeta.appProperties, ...fileMeta.properties };
+  const buildFolderId = fileMeta.parents?.[0] || props.builddrop_build_folder_id;
+
   if (Number(size) > MAX_EXTRACT_BYTES) {
     return Response.json({ success: false, reason: 'file_too_large' });
   }
 
-  const tmpPath = join(tmpdir(), `builddrop-${fileId}-${Date.now()}.ipa`);
+  const originalName = props.original_name || fileMeta.name || '';
+  const isApk = /\.apk$/i.test(originalName);
+  const ext = isApk ? 'apk' : 'ipa';
+
+  const tmpPath = join(tmpdir(), `builddrop-${fileId}-${Date.now()}.${ext}`);
   try {
     const fileRes = await fetch(
       `${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!fileRes.ok || !fileRes.body) {
-      console.error('Failed to fetch ipa bytes:', fileRes.status);
+      console.error('Failed to fetch file bytes:', fileRes.status);
       return Response.json({ success: false, reason: 'download_failed' });
     }
     await pipeline(Readable.fromWeb(fileRes.body as any), createWriteStream(tmpPath));
@@ -129,11 +142,96 @@ export default async (req: Request) => {
     const bundleId: string | undefined = result?.CFBundleIdentifier || result?.package;
     const bundleVersion: string | undefined = result?.CFBundleShortVersionString || result?.versionName || result?.CFBundleVersion;
     const buildNumber: string | undefined = result?.CFBundleVersion || (result?.versionCode ? result.versionCode.toString() : undefined);
-    const appIconData: string | undefined = typeof result?.icon === 'string' ? result.icon : undefined;
+
+    let appIconData: string | undefined = undefined;
+
+    // Density-ordered regex matching for crisp HD launcher icons (xxxhdpi/xxhdpi 192px/144px)
+    const densityRegexes = [
+      /mipmap-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+      /mipmap-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+      /drawable-xxxhdpi.*ic_launcher.*\.(png|webp)$/i,
+      /drawable-xxhdpi.*ic_launcher.*\.(png|webp)$/i,
+      /mipmap-xxxhdpi.*\.(png|webp)$/i,
+      /mipmap-xxhdpi.*\.(png|webp)$/i,
+      /drawable-xxxhdpi.*\.(png|webp)$/i,
+      /drawable-xxhdpi.*\.(png|webp)$/i,
+      /mipmap-xhdpi.*ic_launcher.*\.(png|webp)$/i,
+      /mipmap-hdpi.*ic_launcher.*\.(png|webp)$/i,
+      /AppIcon.*60x60@3x\.png$/i,
+      /AppIcon.*60x60@2x\.png$/i,
+    ];
+
+    if (typeof (parser as any).getEntry === 'function') {
+      for (const regex of densityRegexes) {
+        try {
+          const iconBuffer = await (parser as any).getEntry(regex);
+          if (iconBuffer && iconBuffer.length > 0) {
+            const isWebp = iconBuffer.length > 12 && iconBuffer.toString('utf8', 8, 12) === 'WEBP';
+            const mime = isWebp ? 'image/webp' : 'image/png';
+            const base64 = Buffer.from(iconBuffer).toString('base64');
+            appIconData = `data:${mime};base64,${base64}`;
+            break;
+          }
+        } catch {}
+      }
+    }
+
+    if (!appIconData) {
+      let rawIconPaths: any = result?.application?.icon || result?.icon;
+      if (rawIconPaths && !Array.isArray(rawIconPaths) && typeof rawIconPaths === 'object') {
+        rawIconPaths = Object.values(rawIconPaths);
+      }
+
+      if (Array.isArray(rawIconPaths)) {
+        const pngPaths: string[] = rawIconPaths
+          .map((p: any) => (typeof p === 'string' ? p : p?.path || ''))
+          .filter((p: string) => typeof p === 'string' && /\.(png|webp)$/i.test(p));
+
+        const scorePath = (p: string) => {
+          let score = 0;
+          const lower = p.toLowerCase();
+          if (lower.includes('xxxhdpi') || lower.includes('512') || lower.includes('192')) score += 50;
+          else if (lower.includes('xxhdpi') || lower.includes('144')) score += 40;
+          else if (lower.includes('xhdpi') || lower.includes('96')) score += 30;
+          else if (lower.includes('hdpi') || lower.includes('72')) score += 20;
+
+          if (lower.includes('ic_launcher') || lower.includes('app_icon')) score += 15;
+          if (lower.includes('foreground') || lower.includes('background')) score -= 5;
+          return score;
+        };
+
+        pngPaths.sort((a, b) => scorePath(b) - scorePath(a));
+
+        for (const candidatePath of pngPaths) {
+          if (typeof (parser as any).getEntry === 'function') {
+            try {
+              const iconBuffer = await (parser as any).getEntry(candidatePath);
+              if (iconBuffer && iconBuffer.length > 0) {
+                const isWebp = iconBuffer.length > 12 && iconBuffer.toString('utf8', 8, 12) === 'WEBP';
+                const mime = isWebp ? 'image/webp' : 'image/png';
+                const base64 = Buffer.from(iconBuffer).toString('base64');
+                appIconData = `data:${mime};base64,${base64}`;
+                break;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    }
+
+    if (!appIconData) {
+      let rawIconData = result?.icon;
+      if (rawIconData && typeof rawIconData.then === 'function') {
+        rawIconData = await rawIconData;
+      }
+      if (typeof rawIconData === 'string' && rawIconData.startsWith('data:image/')) {
+        appIconData = rawIconData;
+      }
+    }
 
     let iconUrl: string | undefined = undefined;
     if (appIconData && appIconData.startsWith('data:image/')) {
-      iconUrl = await uploadIconImageToDrive(token, fileId, appIconData);
+      iconUrl = await uploadIconImageToDrive(token, fileId, appIconData, buildFolderId);
     }
 
     const properties: Record<string, string> = {};

@@ -82,9 +82,15 @@ export default async (request: Request, context: Context) => {
       responseBody = driveRes.body.pipeThrough(transformStream);
     }
 
+    const isInline = url.searchParams.get('inline') === '1';
     const asciiName = requestedName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
     const headers = new Headers();
-    headers.set('Content-Type', driveRes.headers.get('Content-Type') || 'application/octet-stream');
+
+    let contentType = driveRes.headers.get('Content-Type') || 'application/octet-stream';
+    if (isInline && (contentType.includes('octet-stream') || contentType === 'application/octet-stream')) {
+      contentType = 'image/png';
+    }
+    headers.set('Content-Type', contentType);
     
     if (length) headers.set('Content-Length', length);
 
@@ -94,8 +100,12 @@ export default async (request: Request, context: Context) => {
     const acceptRanges = driveRes.headers.get('Accept-Ranges');
     if (acceptRanges) headers.set('Accept-Ranges', acceptRanges);
 
-    headers.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(requestedName)}`);
-    headers.set('Cache-Control', 'no-store');
+    if (isInline) {
+      headers.set('Content-Disposition', 'inline');
+    } else {
+      headers.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(requestedName)}`);
+    }
+    headers.set('Cache-Control', 'public, max-age=86400');
 
     return new Response(responseBody, { status: driveRes.status, headers });
   } catch (err: any) {
