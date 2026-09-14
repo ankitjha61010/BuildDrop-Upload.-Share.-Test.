@@ -11,6 +11,46 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { TermsPage } from './pages/TermsPage';
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Unhandled UI Error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="py-24 text-center max-w-md mx-auto px-4">
+          <div className="p-8 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl">
+            <h2 className="text-xl font-bold text-white mb-2">Something went wrong</h2>
+            <p className="text-sm text-slate-400 mb-6">{this.state.error?.message || 'An unexpected error occurred while rendering this page.'}</p>
+            <button
+              onClick={() => (window.location.href = '/')}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl text-sm transition-all"
+            >
+              Return to Home
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
@@ -21,15 +61,17 @@ export const App: React.FC = () => {
 
           {/* Main App Page Content */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 pb-24 md:pb-8">
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/upload" element={<Navigate to="/#uploader" replace />} />
-              <Route path="/watch/:videoId" element={<WatchPage />} />
-              <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
-              <Route path="/terms" element={<TermsPage />} />
-              <Route path="/404" element={<NotFoundPage />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+            <ErrorBoundary>
+              <Routes>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/upload" element={<Navigate to="/#uploader" replace />} />
+                <Route path="/watch/:videoId" element={<WatchPage />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+                <Route path="/terms" element={<TermsPage />} />
+                <Route path="/404" element={<NotFoundPage />} />
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </ErrorBoundary>
           </main>
 
           {/* Footer with Privacy Policy and Terms Links */}

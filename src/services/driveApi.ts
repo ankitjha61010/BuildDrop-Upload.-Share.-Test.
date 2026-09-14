@@ -176,22 +176,37 @@ export class DriveApiService {
   public async getVideoMetadata(fileId: string): Promise<VideoMetadata> {
     let file: any = null;
 
-    // 1. Fetch metadata via the public API-key endpoint. Works because uploaded files are
-    // already shared as "anyone with the link can view" - Drive allows reading a public file's
-    // metadata with just an API key, no OAuth required.
-    const apiKey = getGoogleApiKey();
-    if (apiKey) {
-      try {
-        const res = await fetch(
-          `${DRIVE_API_V3}/files/${fileId}?fields=id,name,size,mimeType,createdTime,thumbnailLink,webContentLink,webViewLink,properties,appProperties,trashed&key=${apiKey}`
-        );
-        if (res.ok) {
-          file = await res.json();
-        } else {
-          console.warn('Public API-key metadata fetch failed:', res.status, await res.text());
+    // 1. Try server-side Netlify Function first (uses OAuth token, works reliably for any file)
+    try {
+      const res = await fetch(`/api/get-metadata?id=${encodeURIComponent(fileId)}`);
+      if (res.ok) {
+        file = await res.json();
+      } else if (res.status === 404) {
+        throw new Error('This file has been removed or deleted from Google Drive.');
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('removed or deleted')) {
+        throw err;
+      }
+      console.warn('Server get-metadata endpoint fetch warning:', err);
+    }
+
+    // 2. Fallback to public API-key endpoint if server endpoint failed or not running Netlify
+    if (!file || !file.id) {
+      const apiKey = getGoogleApiKey();
+      if (apiKey) {
+        try {
+          const res = await fetch(
+            `${DRIVE_API_V3}/files/${fileId}?fields=id,name,size,mimeType,createdTime,thumbnailLink,webContentLink,webViewLink,properties,appProperties,trashed&key=${apiKey}`
+          );
+          if (res.ok) {
+            file = await res.json();
+          } else {
+            console.warn('Public API-key metadata fetch failed:', res.status, await res.text());
+          }
+        } catch (err) {
+          console.warn('Public API-key metadata fetch error:', err);
         }
-      } catch (err) {
-        console.warn('Public API-key metadata fetch error:', err);
       }
     }
 

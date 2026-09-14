@@ -158,7 +158,6 @@ export const VideoUploader: React.FC = () => {
           <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 max-w-xl mx-auto mb-8 text-left">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs text-slate-400 font-medium">Share Link:</span>
-              <span className="text-[11px] text-indigo-400 font-mono">Secure One-Time Link</span>
             </div>
             <p className="text-xs sm:text-sm font-mono text-indigo-300 bg-black/40 p-3 rounded-xl border border-slate-800 break-all select-all">
               {watchUrl}
@@ -304,10 +303,6 @@ export const VideoUploader: React.FC = () => {
                       <span className="font-semibold text-indigo-300 truncate block">
                         VidSetu_Uploads
                       </span>
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-slate-400 block">Transfer Security:</span>
-                      <span className="font-semibold text-emerald-400">Auto-Deleted on Download</span>
                     </div>
                   </div>
                 </div>

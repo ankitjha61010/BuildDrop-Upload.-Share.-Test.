@@ -199,7 +199,7 @@ export const WatchPage: React.FC = () => {
                       <Smartphone className="w-5 h-5 text-white" />
                     </div>
                     <span className="text-[10px] font-extrabold tracking-widest uppercase text-white/90 truncate max-w-[80px] px-1">
-                      {cleanAppName.split(' ').map(w => w[0]).join('').slice(0, 4) || cleanAppName.slice(0, 4)}
+                      {(cleanAppName || 'Build').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || (cleanAppName || 'Build').slice(0, 4)}
                     </span>
                   </div>
                 )}
