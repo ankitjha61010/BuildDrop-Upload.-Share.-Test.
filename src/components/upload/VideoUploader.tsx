@@ -6,12 +6,13 @@ import { UploadProgressInfo, VideoMetadata } from '../../types';
 import { qrService } from '../../services/qrService';
 import { CopyLinkButton } from '../common/CopyLinkButton';
 import { QRModal } from '../common/QRModal';
-import { FileCategory, formatFileSize, getFileTypeMeta } from '../../utils/fileType';
+import { FileCategory, formatFileSize, getFileTypeMeta, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../../utils/fileType';
 import {
   UploadCloud,
   CheckCircle2,
   QrCode,
   ShieldAlert,
+  Smartphone,
 } from 'lucide-react';
 
 export const VideoUploader: React.FC = () => {
@@ -203,11 +204,10 @@ export const VideoUploader: React.FC = () => {
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${
-                dragActive
+              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${dragActive
                   ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]'
                   : 'border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/40'
-              }`}
+                }`}
             >
               <input
                 ref={fileInputRef}
@@ -244,68 +244,119 @@ export const VideoUploader: React.FC = () => {
             /* Selected File Details & Preview */
             <div className="glass-card p-6 sm:p-8 rounded-3xl border border-slate-800 space-y-6">
               <div className="flex flex-col md:flex-row gap-6 items-start">
-                {/* Real Preview (video/image) or File-Type Icon */}
-                <div className="w-full md:w-56 h-36 bg-black rounded-2xl overflow-hidden border border-slate-800 relative flex items-center justify-center shrink-0">
-                  {videoPreviewUrl && fileCategory === 'video' ? (
-                    <video
-                      src={videoPreviewUrl}
-                      className="w-full h-full object-contain"
-                      controls
-                      playsInline
-                    />
-                  ) : videoPreviewUrl && fileCategory === 'image' ? (
-                    <img
-                      src={videoPreviewUrl}
-                      alt={selectedFile.name}
-                      className="w-full h-full object-contain"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-slate-500 p-4 text-center">
-                      {(() => {
-                        const meta = getFileTypeMeta(selectedFile.name, selectedFile.type);
-                        return (
-                          <>
-                            <div className={`w-14 h-14 rounded-2xl ${meta.bg} border ${meta.border} flex items-center justify-center mb-2`}>
-                              <meta.Icon className={`w-7 h-7 ${meta.iconColor}`} />
+                {/* Real Preview (video/image), App Icon, or File-Type Icon */}
+                {(() => {
+                  const isIpa = isIpaFile(selectedFile.name);
+                  const isAndroidPkg = isAndroidPackageFile(selectedFile.name);
+                  const isAppPkg = isIpa || isAndroidPkg || fileCategory === 'apk';
+                  const appMeta = parseAppMetadataFromFilename(selectedFile.name);
+                  const cleanAppName = appMeta.cleanAppName || selectedFile.name;
+                  const platformLabel = isIpa ? 'iOS Build (.ipa)' : isAndroidPkg ? 'Android Package (.apk)' : 'App Package';
+                  const appInitials = (cleanAppName || 'App').split(' ').filter(Boolean).map(w => w[0] || '').join('').slice(0, 4) || 'APP';
+                  const estimatedBundleId = `com.builddrop.${(cleanAppName || 'app').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+                  return (
+                    <>
+                      <div className="w-full md:w-56 h-36 bg-[#0a0e17] rounded-2xl overflow-hidden border border-slate-800 relative flex items-center justify-center shrink-0">
+                        {videoPreviewUrl && fileCategory === 'video' ? (
+                          <video
+                            src={videoPreviewUrl}
+                            className="w-full h-full object-contain"
+                            controls
+                            playsInline
+                          />
+                        ) : videoPreviewUrl && fileCategory === 'image' ? (
+                          <img
+                            src={videoPreviewUrl}
+                            alt={selectedFile.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : isAppPkg ? (
+                          <div className="w-full h-full bg-gradient-to-br from-indigo-950/80 via-purple-950/60 to-slate-950 p-4 flex flex-col items-center justify-center text-center select-none">
+                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 border border-white/20 shadow-xl flex items-center justify-center mb-2">
+                              <Smartphone className="w-6 h-6 text-white" />
                             </div>
-                            <span className="text-[11px]">{meta.label}</span>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
+                            <span className="text-xs font-extrabold tracking-widest uppercase text-white/90 truncate max-w-[170px] px-1">
+                              {appInitials}
+                            </span>
+                            <span className="text-[10px] font-medium text-indigo-300 mt-0.5">
+                              {platformLabel}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-500 p-4 text-center">
+                            {(() => {
+                              const meta = getFileTypeMeta(selectedFile.name, selectedFile.type);
+                              return (
+                                <>
+                                  <div className={`w-14 h-14 rounded-2xl ${meta.bg} border ${meta.border} flex items-center justify-center mb-2`}>
+                                    <meta.Icon className={`w-7 h-7 ${meta.iconColor}`} />
+                                  </div>
+                                  <span className="text-[11px] text-slate-300">{meta.label}</span>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
 
-                {/* File Information */}
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                      Ready to Upload (Max 12 GB)
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-bold text-white truncate" title={selectedFile.name}>
-                    {selectedFile.name}
-                  </h3>
+                      {/* File Information */}
+                      <div className="flex-1 min-w-0 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Ready to Upload (Max 12 GB)
+                          </span>
+                          {isAppPkg && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              {platformLabel}
+                            </span>
+                          )}
+                        </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs pt-1">
-                    <div className="min-w-0">
-                      <span className="text-slate-400 block">File Size:</span>
-                      <span className="font-semibold text-slate-200">{formatFileSize(selectedFile.size)}</span>
-                    </div>
-                    <div className="min-w-0" title={`${getFileTypeMeta(selectedFile.name, selectedFile.type).label} (${selectedFile.type || 'unknown'})`}>
-                      <span className="text-slate-400 block">File Type:</span>
-                      <span className="font-semibold text-slate-200 truncate block">
-                        {getFileTypeMeta(selectedFile.name, selectedFile.type).label} ({selectedFile.type || 'unknown'})
-                      </span>
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-slate-400 block">Target Upload Folder:</span>
-                      <span className="font-semibold text-indigo-300 truncate block">
-                        VidSetu_Uploads
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-white truncate" title={cleanAppName}>
+                            {cleanAppName}
+                          </h3>
+                          <p className="font-mono text-xs text-slate-400 truncate mt-0.5" title={selectedFile.name}>
+                            File: {selectedFile.name}
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs pt-2 border-t border-slate-800/80">
+                          <div className="min-w-0">
+                            <span className="text-slate-400 block text-[11px]">File Size:</span>
+                            <span className="font-semibold text-slate-200">{formatFileSize(selectedFile.size)}</span>
+                          </div>
+
+                          {isAppPkg ? (
+                            <>
+                              <div className="min-w-0">
+                                <span className="text-slate-400 block text-[11px]">Version & Build:</span>
+                                <span className="font-semibold text-indigo-300">v{appMeta.version} (#{appMeta.buildNumber})</span>
+                              </div>
+                              <div className="min-w-0 col-span-2 sm:col-span-1">
+                                <span className="text-slate-400 block text-[11px]">Estimated Bundle ID:</span>
+                                <span className="font-mono font-semibold text-slate-300 truncate block text-[11px]" title={estimatedBundleId}>{estimatedBundleId}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="min-w-0">
+                              <span className="text-slate-400 block text-[11px]">Category:</span>
+                              <span className="font-semibold text-slate-200 truncate block">
+                                {getFileTypeMeta(selectedFile.name, selectedFile.type).label}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <span className="text-slate-400 block text-[11px]">Target Folder:</span>
+                            <span className="font-semibold text-indigo-300 truncate block">VidSetu_Uploads</span>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Progress State while uploading */}

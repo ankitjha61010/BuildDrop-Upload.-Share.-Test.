@@ -35,6 +35,7 @@ export const WatchPage: React.FC = () => {
   const [isExpired, setIsExpired] = useState<boolean>(false);
   const [downloadReason] = useState<'downloaded' | 'expired'>('expired');
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -114,8 +115,6 @@ export const WatchPage: React.FC = () => {
   const bundleVersion = video.bundleVersion || parsedMeta.version;
   const buildNumber = video.buildNumber || parsedMeta.buildNumber;
   const platformName = fileIsIpa ? 'iOS' : fileIsAndroidPackage ? 'Android' : 'build';
-
-  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Manual Delete File handler
   const handleDeleteFile = async () => {
