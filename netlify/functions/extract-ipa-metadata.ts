@@ -1,9 +1,7 @@
-// Runs (fire-and-forget from the client) right after a .ipa finishes uploading: downloads the
-// file to disk - app-info-parser's Node backend needs a real file path, not a Buffer/stream, so
-// it can random-access the zip's central directory - pulls CFBundleIdentifier/Version/DisplayName
-// out of its embedded Info.plist, and saves them onto the Drive file's custom properties. This
-// lets /api/ipa-manifest build a real iOS OTA install manifest later without re-downloading and
-// re-parsing the .ipa on every page visit.
+// Runs (fire-and-forget from the client) right after a .ipa/.apk finishes uploading:
+// downloads the file to temp disk, parses embedded Info.plist / AndroidManifest.xml for real app metadata
+// (app icon PNG, bundle ID, version, build number, app name), uploads the extracted icon PNG to Drive,
+// and saves properties onto the Drive file.
 import type { Config } from '@netlify/functions';
 import { createWriteStream } from 'fs';
 import { unlink } from 'fs/promises';
@@ -15,10 +13,63 @@ import AppInfoParser from 'app-info-parser';
 import { getDriveAccessToken } from '../lib/googleDriveAuth';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
-// Keeps the download + unzip comfortably inside a Netlify Function's time/memory budget. Larger
-// .ipa files just skip auto-extraction - the install manifest still works, with placeholder
-// metadata (see ipa-manifest.ts).
+const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const MAX_EXTRACT_BYTES = 150 * 1024 * 1024;
+
+async function uploadIconImageToDrive(token: string, fileId: string, base64Data: string): Promise<string | undefined> {
+  try {
+    const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) return undefined;
+
+    const buffer = Buffer.from(match[2], 'base64');
+    const iconFileName = `icon_${fileId}.png`;
+
+    // 1. Create file resource metadata
+    const createRes = await fetch(`${DRIVE_API}/files?supportsAllDrives=true`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: iconFileName,
+        mimeType: 'image/png',
+        description: `BuildDrop App Icon for file ${fileId}`,
+      }),
+    });
+
+    if (!createRes.ok) {
+      console.error('Failed to create icon file resource:', createRes.status, await createRes.text());
+      return undefined;
+    }
+    const created = await createRes.json();
+    const iconFileId = created.id;
+
+    // 2. Upload binary bytes
+    const mediaRes = await fetch(
+      `${DRIVE_UPLOAD_API}/files/${encodeURIComponent(iconFileId)}?uploadType=media&supportsAllDrives=true`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'image/png' },
+        body: buffer,
+      }
+    );
+
+    if (!mediaRes.ok) {
+      console.error('Failed to upload icon bytes:', mediaRes.status, await mediaRes.text());
+      return undefined;
+    }
+
+    // 3. Set public read permissions
+    await fetch(`${DRIVE_API}/files/${encodeURIComponent(iconFileId)}/permissions?supportsAllDrives=true`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    }).catch(() => {});
+
+    return `https://drive.google.com/uc?export=view&id=${iconFileId}`;
+  } catch (err) {
+    console.error('Error in uploadIconImageToDrive:', err);
+    return undefined;
+  }
+}
 
 export default async (req: Request) => {
   if (req.method !== 'POST') {
@@ -78,14 +129,19 @@ export default async (req: Request) => {
     const bundleId: string | undefined = result?.CFBundleIdentifier || result?.package;
     const bundleVersion: string | undefined = result?.CFBundleShortVersionString || result?.versionName || result?.CFBundleVersion;
     const buildNumber: string | undefined = result?.CFBundleVersion || (result?.versionCode ? result.versionCode.toString() : undefined);
-    const appIcon: string | undefined = typeof result?.icon === 'string' ? result.icon : undefined;
+    const appIconData: string | undefined = typeof result?.icon === 'string' ? result.icon : undefined;
+
+    let iconUrl: string | undefined = undefined;
+    if (appIconData && appIconData.startsWith('data:image/')) {
+      iconUrl = await uploadIconImageToDrive(token, fileId, appIconData);
+    }
 
     const properties: Record<string, string> = {};
     if (bundleId) properties.builddrop_bundle_id = bundleId.slice(0, 100);
     if (bundleVersion) properties.builddrop_bundle_version = bundleVersion.slice(0, 50);
     if (buildNumber) properties.builddrop_build_number = buildNumber.slice(0, 50);
     if (typeof rawAppName === 'string' && rawAppName) properties.builddrop_app_name = rawAppName.slice(0, 100);
-    if (typeof appIcon === 'string' && appIcon) properties.builddrop_app_icon = appIcon;
+    if (iconUrl) properties.builddrop_app_icon = iconUrl.slice(0, 120);
 
     if (Object.keys(properties).length > 0) {
       const patchRes = await fetch(
@@ -101,7 +157,7 @@ export default async (req: Request) => {
       }
     }
 
-    return Response.json({ success: true, bundleId, bundleVersion, appName: rawAppName, appIcon: Boolean(appIcon) });
+    return Response.json({ success: true, bundleId, bundleVersion, appName: rawAppName, appIconUrl: iconUrl });
   } catch (err) {
     console.error('Failed to parse app metadata:', err);
     return Response.json({ success: false, reason: 'parse_failed' });
