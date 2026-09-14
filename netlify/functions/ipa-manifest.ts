@@ -59,7 +59,7 @@ export default async (req: Request) => {
   // Dynamically extract real bundleId from .ipa if missing or placeholder.
   if (!bundleId || bundleId.startsWith('com.builddrop.')) {
     try {
-      const AppInfoParser = (await import('app-info-parser')).default;
+      const AppInfoParser: any = (await import('app-info-parser')).default || (await import('app-info-parser'));
       const { createWriteStream } = await import('fs');
       const { unlink } = await import('fs/promises');
       const { pipeline } = await import('stream/promises');
