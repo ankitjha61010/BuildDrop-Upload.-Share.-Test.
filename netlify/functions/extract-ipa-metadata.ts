@@ -85,6 +85,7 @@ export default async (req: Request) => {
     if (bundleVersion) properties.builddrop_bundle_version = bundleVersion.slice(0, 50);
     if (buildNumber) properties.builddrop_build_number = buildNumber.slice(0, 50);
     if (typeof rawAppName === 'string' && rawAppName) properties.builddrop_app_name = rawAppName.slice(0, 100);
+    if (typeof appIcon === 'string' && appIcon) properties.builddrop_app_icon = appIcon;
 
     if (Object.keys(properties).length > 0) {
       const patchRes = await fetch(

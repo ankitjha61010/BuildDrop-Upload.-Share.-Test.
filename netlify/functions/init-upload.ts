@@ -108,6 +108,7 @@ export default async (req: Request) => {
   if (typeof bundleId === 'string' && bundleId) propertiesRecord.builddrop_bundle_id = bundleId.slice(0, 100);
   if (typeof bundleVersion === 'string' && bundleVersion) propertiesRecord.builddrop_bundle_version = bundleVersion.slice(0, 50);
   if (typeof buildNumber === 'string' && buildNumber) propertiesRecord.builddrop_build_number = buildNumber.slice(0, 50);
+  if (typeof appIcon === 'string' && appIcon) propertiesRecord.builddrop_app_icon = appIcon;
 
   const metadata = {
     name: fileName,

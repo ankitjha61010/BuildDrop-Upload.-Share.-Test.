@@ -24,6 +24,7 @@ import {
   Layers,
   Hash,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 
 export const WatchPage: React.FC = () => {
@@ -114,6 +115,26 @@ export const WatchPage: React.FC = () => {
   const buildNumber = video.buildNumber || parsedMeta.buildNumber;
   const platformName = fileIsIpa ? 'iOS' : fileIsAndroidPackage ? 'Android' : 'build';
 
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  // Manual Delete File handler
+  const handleDeleteFile = async () => {
+    if (!video) return;
+    if (!window.confirm(`Are you sure you want to delete "${video.name}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      setIsDeleting(true);
+      await driveApi.consumeTemporaryDownload(video.driveFileId);
+      showToast('File Deleted', 'The file has been permanently deleted.', 'success');
+      window.location.href = '/';
+    } catch (e: any) {
+      console.error('Delete error:', e);
+      showToast('Delete Failed', e?.message || 'Unable to delete file.', 'error');
+      setIsDeleting(false);
+    }
+  };
+
   // Direct download handler
   const handleDownloadFile = () => {
     try {
@@ -173,15 +194,14 @@ export const WatchPage: React.FC = () => {
                     className="w-full h-full object-cover rounded-2xl p-1 bg-slate-950/40"
                   />
                 ) : (
-                  <>
-                    <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/20 mb-1">
-                      <Smartphone className="w-6 h-6 text-white" />
+                  <div className="w-full h-full bg-gradient-to-br from-indigo-500 via-purple-600 to-slate-900 flex flex-col items-center justify-center p-2 text-center select-none">
+                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/20 mb-1 shadow-inner">
+                      <Smartphone className="w-5 h-5 text-white" />
                     </div>
-                    <span className="text-[10px] font-bold tracking-wider uppercase text-white/80 truncate max-w-[80px]">
-                      {cleanAppName.slice(0, 8)}
+                    <span className="text-[10px] font-extrabold tracking-widest uppercase text-white/90 truncate max-w-[80px] px-1">
+                      {cleanAppName.split(' ').map(w => w[0]).join('').slice(0, 4) || cleanAppName.slice(0, 4)}
                     </span>
-                  </>
+                  </div>
                 )}
               </div>
 
@@ -254,14 +274,14 @@ export const WatchPage: React.FC = () => {
                 </div>
 
                 {/* Info prompts for platform compatibility */}
-                {fileIsIpa && visitorIsIOS && (
+                {/* {fileIsIpa && visitorIsIOS && (
                   <div className="text-[11px] sm:text-xs text-slate-300 bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 flex items-start gap-2 text-left">
                     <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                     <span>
                       <strong>iOS Installation Notice:</strong> After tapping Install, return to home screen. If iOS shows "Unable to Verify", go to <strong>Settings → General → VPN & Device Management</strong> and tap <strong>Trust Certificate</strong>.
                     </span>
                   </div>
-                )}
+                )} */}
 
                 {fileIsIpa && !visitorIsIOS && (
                   <div className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/60 rounded-xl p-3 flex items-start gap-2 text-left">
@@ -321,14 +341,30 @@ export const WatchPage: React.FC = () => {
                   <span>Download Build File ({formatFileSize(video.size)})</span>
                 </button>
 
-                {/* Secondary Action - Upload Another Build */}
-                <Link
-                  to="/"
-                  className="w-full py-2.5 px-6 rounded-xl hover:bg-slate-800/60 text-slate-400 hover:text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all text-center"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Upload Another Build</span>
-                </Link>
+                {/* Secondary Action - Upload Another Build & Delete */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                  <Link
+                    to="/"
+                    className="w-full sm:w-auto py-2 px-4 rounded-xl hover:bg-slate-800/60 text-slate-400 hover:text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-all text-center"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Upload Another Build</span>
+                  </Link>
+
+                  <button
+                    onClick={handleDeleteFile}
+                    disabled={isDeleting}
+                    className="w-full sm:w-auto py-2 px-4 rounded-xl hover:bg-red-500/10 text-slate-400 hover:text-red-400 font-medium text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    title="Permanently delete this build from storage"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                    )}
+                    <span>Delete Build Data</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
