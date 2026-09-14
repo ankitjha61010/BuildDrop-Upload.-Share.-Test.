@@ -45,7 +45,7 @@ export const UploadProgress: React.FC<UploadProgressProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
               {status === 'preparing' && 'Preparing Upload...'}
-              {status === 'uploading' && 'Uploading Video to Drive...'}
+              {status === 'uploading' && 'Uploading file to server...'}
               {status === 'paused' && 'Upload Paused'}
               {status === 'completed' && 'Upload Successful'}
               {status === 'failed' && 'Upload Failed'}

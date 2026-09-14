@@ -20,6 +20,7 @@ import {
   Trash2,
   ExternalLink,
   History,
+  Clock,
 } from 'lucide-react';
 
 interface VideoUploaderProps {
@@ -295,7 +296,12 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
       showToast('Upload Successful!', `"${selectedFile.name}" is ready to share.`, 'success', 5000);
     } catch (err: any) {
       if (err.message !== 'Upload was cancelled.') {
-        showToast('Upload Error', err.message || 'Failed to upload to Google Drive.', 'error', 6000);
+        const isStorageFull = /storage|quota|full|space|exceeded|507/i.test(err.message || '');
+        const title = isStorageFull ? 'Cloud Storage Full' : 'Upload Error';
+        const msg = isStorageFull
+          ? 'Cloud storage space is currently full. Please wait a few moments while expired builds auto-cleanup, or try again later.'
+          : (err.message || 'Failed to upload to Google Drive.');
+        showToast(title, msg, 'error', 8000);
       }
     }
   };
@@ -656,13 +662,35 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                     </div>
 
                     <div className="min-w-0 space-y-0.5">
-                      <h4 className="text-sm font-bold text-white truncate max-w-xs" title={displayTitle}>
-                        {displayTitle}
-                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <h4 className="text-sm font-bold text-white truncate max-w-xs" title={displayTitle}>
+                          {displayTitle}
+                        </h4>
+                        {item.bundleId && (
+                          <span className="text-[10px] font-mono text-indigo-300/90 bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-500/20 truncate max-w-[220px]" title={item.bundleId}>
+                            {item.bundleId}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                         <span className="font-semibold text-indigo-300">{displayVersionStr}</span>
                         <span>•</span>
                         <span>{formatFileSize(item.size)}</span>
+                        {item.createdAt && (
+                          <>
+                            <span>•</span>
+                            <span className="text-slate-300 font-medium inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-sky-400" />
+                              {(() => {
+                                const date = new Date(item.createdAt);
+                                const now = new Date();
+                                const isToday = date.toDateString() === now.toDateString();
+                                const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                return isToday ? `Today at ${timeStr}` : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`;
+                              })()}
+                            </span>
+                          </>
+                        )}
                         <span>•</span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
                           {item.uploadType === 'PRIVATE' ? 'Private Storage' : 'Public Storage'}

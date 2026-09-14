@@ -248,8 +248,20 @@ export default async (req: Request) => {
 
   if (!sessionRes.ok) {
     const detail = await sessionRes.text().catch(() => '');
-    console.error('Failed to initiate Drive resumable session:', sessionRes.status, detail);
-    return new Response('Failed to initiate upload session', { status: 502 });
+    console.error('Drive resumable session create failed:', sessionRes.status, detail);
+    if (sessionRes.status === 403 || sessionRes.status === 507 || /quota|storage|space|exceeded/i.test(detail)) {
+      return Response.json(
+        {
+          error: 'STORAGE_FULL',
+          message: 'Google Drive storage space is currently full. Please wait a few moments while expired builds auto-cleanup, or try again later.',
+        },
+        { status: 507 }
+      );
+    }
+    return Response.json(
+      { error: 'INIT_FAILED', message: `Failed to initialize resumable upload session: ${detail || sessionRes.statusText}` },
+      { status: sessionRes.status }
+    );
   }
 
   const uploadUrl = sessionRes.headers.get('Location');

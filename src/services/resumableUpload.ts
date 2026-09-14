@@ -249,6 +249,8 @@ export class ResumableUploader {
           } else if (result.status === 200 || result.status === 201) {
             // Completed!
             return await this.completeUpload(JSON.parse(result.response));
+          } else if (result.status === 507 || result.status === 403 || /quota|storage|space|exceeded/i.test(result.response)) {
+            throw new Error('Google Drive storage space is currently full. Please wait a few moments while expired builds auto-cleanup, or try again later.');
           } else {
             throw new Error(`Unexpected server response during chunk upload: HTTP ${result.status}`);
           }
