@@ -119,14 +119,7 @@ export const WatchPage: React.FC = () => {
     try {
       setIsDownloading(true);
       const downloadUrl = getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name);
-
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = video.originalFileName || video.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
+      window.location.href = downloadUrl;
       showToast('Download Started', 'Your build file download has started.', 'success');
     } catch (e: any) {
       console.error('Download trigger error:', e);

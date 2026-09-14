@@ -42,13 +42,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
       // the SPA's own index.html - is caught here and surfaced as an error, instead of silently
       // being saved to disk as if it were the real file.
       const downloadUrl = getDirectDownloadUrl(video.driveFileId, video.originalFileName || video.name);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = video.originalFileName || video.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
+      window.location.href = downloadUrl;
       showToast('Download Started', 'Your file is downloading.', 'success');
     } catch (err: any) {
       console.error('Download error:', err);

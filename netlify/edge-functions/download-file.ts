@@ -49,7 +49,10 @@ export default async (request: Request, context: Context) => {
     if (!driveRes.ok || !driveRes.body) {
       const detail = await driveRes.text().catch(() => '');
       console.error('Drive media fetch failed:', driveRes.status, detail);
-      return new Response('Failed to fetch file from Drive', { status: driveRes.status === 404 ? 404 : 502 });
+      return new Response(`Failed to fetch file from Drive (HTTP ${driveRes.status}): ${detail}`, {
+        status: driveRes.status === 404 ? 404 : 502,
+        headers: { 'Content-Type': 'text/plain' },
+      });
     }
 
     const length = driveRes.headers.get('Content-Length');
