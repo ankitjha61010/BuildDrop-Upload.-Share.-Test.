@@ -1,8 +1,16 @@
 // Rewrites the static index.html's Open Graph / Twitter meta tags with the specific build's own
-// name, description and app icon before handing the page to a link-preview crawler (Slack,
-// WhatsApp, Discord, iMessage, etc). Those crawlers never run our client-side JS, so without this
-// every /watch/:id link unfurls with the same generic site title/description and no image - which
-// is what was happening when builds were shared in Slack.
+// name and description before handing the page to a link-preview crawler (Slack, WhatsApp,
+// Discord, iMessage, etc). Those crawlers never run our client-side JS, so without this every
+// /watch/:id link unfurls with the same generic site title/description and no image - which is
+// what was happening when builds were shared in Slack.
+//
+// The preview image is always the static BuildDrop site logo (og-image.png), never the build's
+// own app icon: that icon has to be fetched live through our Drive-authenticated proxy on every
+// single unfurl request, and whoever's crawler/client hits it first can catch it mid-failure
+// (an expired token, a slow Drive response, a transient rate limit) - which is exactly why the
+// sender saw the icon-based preview render fine while other recipients saw a broken one. The
+// static logo is served straight from Netlify's CDN with nothing to fail, so it renders
+// identically for everyone.
 //
 // Only runs for known crawler User-Agents; real browsers get the untouched SPA shell straight from
 // context.next() so page-load latency for actual visitors is unaffected.
@@ -73,7 +81,7 @@ export default async (request: Request, context: Context) => {
     let title = 'BuildDrop — Upload. Share. Test.';
     let description =
       'Production-grade, frontend-only high-speed file uploading and sharing platform backed directly by Google Drive and Netlify.';
-    let image = `${url.origin}/og-image.png`;
+    const image = `${url.origin}/og-image.png`;
 
     const accessToken = await getDriveAccessToken();
     const driveRes = await fetch(
@@ -88,16 +96,6 @@ export default async (request: Request, context: Context) => {
         const appName = props.builddrop_app_name || props.original_name || file.name || 'Shared Build';
         title = `${appName} — BuildDrop`;
         description = props.builddrop_description || `Download "${appName}" - shared via BuildDrop.`;
-
-        const rawIcon: string | undefined = props.builddrop_app_icon;
-        if (rawIcon) {
-          if (rawIcon.includes('id=')) {
-            const iconId = rawIcon.split('id=')[1]?.split('&')[0];
-            if (iconId) image = `${url.origin}/api/download-file?id=${iconId}&inline=1`;
-          } else if (/^https?:\/\//.test(rawIcon)) {
-            image = rawIcon;
-          }
-        }
       }
     }
 
