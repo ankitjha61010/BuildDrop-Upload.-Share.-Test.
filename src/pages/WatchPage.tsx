@@ -263,6 +263,13 @@ export const WatchPage: React.FC = () => {
                     <span className="font-semibold text-slate-100">{formatFileSize(video.size)}</span>
                   </div>
                 </div>
+
+                {video.description && (
+                  <div className="pt-3 border-t border-slate-800/80 text-left">
+                    <span className="text-[11px] text-slate-400 block mb-1">Description</span>
+                    <p className="text-sm text-slate-200 leading-relaxed">{video.description}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

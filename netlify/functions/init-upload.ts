@@ -132,7 +132,7 @@ export default async (req: Request) => {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  let fileName: unknown, mimeType: unknown, fileSize: unknown, appName: unknown, bundleId: unknown, bundleVersion: unknown, buildNumber: unknown, appIcon: unknown, targetFolder: unknown, userId: unknown;
+  let fileName: unknown, mimeType: unknown, fileSize: unknown, appName: unknown, bundleId: unknown, bundleVersion: unknown, buildNumber: unknown, appIcon: unknown, targetFolder: unknown, userId: unknown, description: unknown;
   try {
     const body = await req.json();
     fileName = body?.fileName;
@@ -145,6 +145,7 @@ export default async (req: Request) => {
     appIcon = body?.appIcon;
     targetFolder = body?.targetFolder;
     userId = body?.userId;
+    description = body?.description;
   } catch {
     return new Response('Invalid JSON body', { status: 400 });
   }
@@ -211,6 +212,7 @@ export default async (req: Request) => {
   if (typeof bundleId === 'string' && bundleId) propertiesRecord.builddrop_bundle_id = bundleId.slice(0, 100);
   if (typeof bundleVersion === 'string' && bundleVersion) propertiesRecord.builddrop_bundle_version = bundleVersion.slice(0, 50);
   if (typeof buildNumber === 'string' && buildNumber) propertiesRecord.builddrop_build_number = buildNumber.slice(0, 50);
+  if (typeof description === 'string' && description.trim()) propertiesRecord.builddrop_description = description.trim().slice(0, 90);
 
   // Handle app icon storage inside the build subfolder
   if (typeof appIcon === 'string' && appIcon) {

@@ -1,4 +1,4 @@
-import { driveApi, fetchJson } from './driveApi';
+import { driveApi, fetchJson, normalizeAppIconUrl } from './driveApi';
 import { UploadProgressInfo, VideoMetadata, UploadStatus } from '../types';
 import { TransferSpeedTracker } from '../utils/transferSpeed';
 import { getOrCreateUserId } from '../utils/userId';
@@ -11,12 +11,14 @@ export interface ResumableUploadOptions {
   file: File;
   onProgress?: (progress: UploadProgressInfo) => void;
   targetFolder?: string;
+  description?: string;
 }
 
 export class ResumableUploader {
   private file: File;
   private onProgress?: (progress: UploadProgressInfo) => void;
   private targetFolder?: string;
+  private description?: string;
   private uploadUrl: string | null = null;
   private isPaused: boolean = false;
   private isCancelled: boolean = false;
@@ -30,6 +32,7 @@ export class ResumableUploader {
     this.file = options.file;
     this.onProgress = options.onProgress;
     this.targetFolder = options.targetFolder;
+    this.description = options.description;
   }
 
   public validateFile(): { valid: boolean; error?: string } {
@@ -187,6 +190,7 @@ export class ResumableUploader {
           buildNumber: this.extractedMeta.buildNumber,
           appIcon: this.extractedMeta.appIcon,
           targetFolder: this.targetFolder,
+          description: this.description,
           userId,
         }),
       },
@@ -324,13 +328,7 @@ export class ResumableUploader {
     const appProps = { ...fileData.appProperties, ...fileData.properties };
 
     const rawIcon = extractedIconUrl || appProps.builddrop_app_icon || this.extractedMeta.appIcon;
-    let finalIcon = rawIcon;
-    if (finalIcon && finalIcon.includes('id=')) {
-      const iconId = finalIcon.split('id=')[1]?.split('&')[0];
-      if (iconId) {
-        finalIcon = `/api/download-file?id=${iconId}&inline=1`;
-      }
-    }
+    const finalIcon = normalizeAppIconUrl(rawIcon);
 
     const videoMeta: VideoMetadata = {
       id: fileData.id,
@@ -351,6 +349,7 @@ export class ResumableUploader {
       bundleVersion: appProps.builddrop_bundle_version || this.extractedMeta.bundleVersion,
       buildNumber: appProps.builddrop_build_number || this.extractedMeta.buildNumber || '1',
       appIcon: finalIcon,
+      description: appProps.builddrop_description || this.description,
     };
 
     driveApi.cacheVideoMetadata(videoMeta);

@@ -112,6 +112,27 @@ export async function fetchJson<T = any>(url: string, init: RequestInit = {}, la
   return res.json();
 }
 
+// Routes a Drive-hosted app icon (lh3.googleusercontent.com/d/{id}, drive.google.com/...?id=...,
+// or a bare Drive file ID) through our own /api/download-file proxy instead of handing back the
+// raw Google URL - that raw link gets blocked by ad blockers / referrer-based hotlink protection,
+// or 403s without a signed-in Google session, and silently fails to load as an <img src>. A
+// data: URI (icon extracted client-side but not yet uploaded to Drive) is returned untouched
+// since it needs no network fetch at all.
+export function normalizeAppIconUrl(rawIcon?: string): string | undefined {
+  if (!rawIcon || rawIcon.startsWith('data:image/')) return rawIcon;
+
+  let iconFileId: string | null = null;
+  if (rawIcon.includes('/d/')) {
+    iconFileId = rawIcon.split('/d/')[1]?.split('/')[0]?.split('?')[0] || null;
+  } else if (rawIcon.includes('id=')) {
+    iconFileId = rawIcon.split('id=')[1]?.split('&')[0] || null;
+  } else if (/^[a-zA-Z0-9_-]{20,}$/.test(rawIcon.trim())) {
+    iconFileId = rawIcon.trim();
+  }
+
+  return iconFileId ? `/api/download-file?id=${iconFileId}&inline=1` : rawIcon;
+}
+
 export class DriveApiService {
   /**
    * Helper to check if a Drive file is a movie/video file
@@ -148,20 +169,7 @@ export class DriveApiService {
       : (createdAt + 10 * 365 * 24 * 60 * 60 * 1000);
     const isExpired = !isPrivate && hasExplicitExpiration && Date.now() > expiresAt;
 
-    let rawAppIcon = appProps.builddrop_app_icon || fallbackLocal.appIcon;
-    if (rawAppIcon && !rawAppIcon.startsWith('data:image/')) {
-      let iconFileId: string | null = null;
-      if (rawAppIcon.includes('/d/')) {
-        iconFileId = rawAppIcon.split('/d/')[1]?.split('/')[0]?.split('?')[0] || null;
-      } else if (rawAppIcon.includes('id=')) {
-        iconFileId = rawAppIcon.split('id=')[1]?.split('&')[0] || null;
-      } else if (/^[a-zA-Z0-9_-]{20,}$/.test(rawAppIcon.trim())) {
-        iconFileId = rawAppIcon.trim();
-      }
-      if (iconFileId) {
-        rawAppIcon = `/api/download-file?id=${iconFileId}&inline=1`;
-      }
-    }
+    const rawAppIcon = normalizeAppIconUrl(appProps.builddrop_app_icon || fallbackLocal.appIcon);
 
     const meta: VideoMetadata = {
       id: file.id,
@@ -183,6 +191,7 @@ export class DriveApiService {
       bundleVersion: appProps.builddrop_bundle_version || fallbackLocal.bundleVersion,
       buildNumber: appProps.builddrop_build_number || fallbackLocal.buildNumber || '1',
       appIcon: rawAppIcon,
+      description: appProps.builddrop_description || fallbackLocal.description,
     };
 
     this.cacheVideoMetadata(meta);
@@ -246,6 +255,7 @@ export class DriveApiService {
             vidsetu_created_at: cached.createdAt?.toString(),
             vidsetu_expires_at: cached.expiresAt?.toString(),
             original_name: cached.originalFileName || cached.name,
+            builddrop_description: cached.description,
           },
         };
       } else {
@@ -329,6 +339,7 @@ export class DriveApiService {
       appIcon: meta.appIcon,
       uploadType: meta.uploadType,
       userId: meta.userId || getOrCreateUserId(),
+      description: meta.description,
     };
     localStorage.setItem(STORAGE_KEY_LOCAL_METAS, JSON.stringify(cache));
   }

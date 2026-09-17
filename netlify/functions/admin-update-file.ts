@@ -19,7 +19,8 @@ export default async (req: Request) => {
     uploadType: unknown,
     expiresAt: unknown,
     removeImage: unknown,
-    newIconUrl: unknown;
+    newIconUrl: unknown,
+    description: unknown;
 
   try {
     const body = await req.json();
@@ -33,6 +34,7 @@ export default async (req: Request) => {
     expiresAt = body?.expiresAt;
     removeImage = body?.removeImage;
     newIconUrl = body?.newIconUrl;
+    description = body?.description;
   } catch {
     return new Response('Invalid JSON body', { status: 400 });
   }
@@ -70,6 +72,13 @@ export default async (req: Request) => {
     if (typeof bundleId === 'string') properties.builddrop_bundle_id = bundleId.slice(0, 100);
     if (typeof bundleVersion === 'string') properties.builddrop_bundle_version = bundleVersion.slice(0, 50);
     if (typeof buildNumber === 'string') properties.builddrop_build_number = buildNumber.slice(0, 50);
+    if (typeof description === 'string') {
+      if (description.trim()) {
+        properties.builddrop_description = description.trim().slice(0, 90);
+      } else {
+        delete properties.builddrop_description;
+      }
+    }
 
     if (uploadType === 'PRIVATE' || uploadType === 'NORMAL') {
       properties.builddrop_upload_type = uploadType;

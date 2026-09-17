@@ -50,10 +50,23 @@ export default async (req: Request) => {
       const createdAt = parseInt(props.vidsetu_created_at || new Date(file.createdTime || Date.now()).getTime().toString(), 10);
       const expiresAt = parseInt(props.vidsetu_expires_at || (createdAt + 12 * 24 * 60 * 60 * 1000).toString(), 10);
 
+      // Route through our own /api/download-file proxy rather than handing back a raw
+      // lh3.googleusercontent.com/drive.google.com link - those get blocked by ad blockers,
+      // referrer-based hotlink protection, or simply 403 without a signed-in Google session,
+      // which silently fails the <img> and falls back to the initials placeholder.
       let appIcon = props.builddrop_app_icon || '';
-      if (appIcon && appIcon.includes('drive.google.com') && appIcon.includes('id=')) {
-        const iconId = appIcon.split('id=')[1]?.split('&')[0];
-        if (iconId) appIcon = `https://lh3.googleusercontent.com/d/${iconId}`;
+      if (appIcon && !appIcon.startsWith('data:image/')) {
+        let iconId: string | null = null;
+        if (appIcon.includes('/d/')) {
+          iconId = appIcon.split('/d/')[1]?.split('/')[0]?.split('?')[0] || null;
+        } else if (appIcon.includes('id=')) {
+          iconId = appIcon.split('id=')[1]?.split('&')[0] || null;
+        } else if (/^[a-zA-Z0-9_-]{20,}$/.test(appIcon.trim())) {
+          iconId = appIcon.trim();
+        }
+        if (iconId) {
+          appIcon = `/api/download-file?id=${iconId}&inline=1`;
+        }
       }
 
       return {
@@ -72,6 +85,7 @@ export default async (req: Request) => {
         bundleVersion: props.builddrop_bundle_version || '',
         buildNumber: props.builddrop_build_number || '',
         appIcon,
+        description: props.builddrop_description || '',
       };
     });
 

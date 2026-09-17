@@ -7,7 +7,7 @@ import { qrService } from '../../services/qrService';
 import { CopyLinkButton } from '../common/CopyLinkButton';
 import { QRModal } from '../common/QRModal';
 import { FileCategory, formatFileSize, getFileTypeMeta, isIpaFile, isAndroidPackageFile, parseAppMetadataFromFilename } from '../../utils/fileType';
-import { driveApi } from '../../services/driveApi';
+import { driveApi, normalizeAppIconUrl } from '../../services/driveApi';
 import { getOrCreateUserId } from '../../utils/userId';
 import {
   UploadCloud,
@@ -33,6 +33,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
   const { showToast } = useToast();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [description, setDescription] = useState<string>('');
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [parsedFileMeta, setParsedFileMeta] = useState<{ appName?: string; bundleId?: string; bundleVersion?: string; buildNumber?: string; appIcon?: string } | null>(null);
   const [fileCategory, setFileCategory] = useState<FileCategory>('other');
@@ -52,7 +53,19 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
     const list = Object.values(cache)
       .filter((item): item is VideoMetadata => Boolean(item && item.id && item.name && (!item.userId || item.userId === currentUserId)))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 3);
+      .slice(0, 3)
+      // Self-heals cache entries saved before icon URLs were routed through /api/download-file -
+      // without this, a build cached with the old raw Drive hotlink would show a broken icon
+      // forever, since nothing else ever re-derives this field for an already-cached item.
+      .map((item) => {
+        const normalizedIcon = normalizeAppIconUrl(item.appIcon);
+        if (normalizedIcon !== item.appIcon) {
+          const healed = { ...item, appIcon: normalizedIcon };
+          driveApi.cacheVideoMetadata(healed as VideoMetadata);
+          return healed;
+        }
+        return item;
+      });
     setRecentUploads(list);
 
     // Verify recent builds against Drive metadata and purge any non-existent/deleted files from cache
@@ -129,6 +142,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
     setUploadedVideo(null);
     setProgressInfo(null);
     setParsedFileMeta(null);
+    setDescription('');
     if (videoPreviewUrl) {
       URL.revokeObjectURL(videoPreviewUrl);
       setVideoPreviewUrl(null);
@@ -281,6 +295,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
     const uploader = new ResumableUploader({
       file: selectedFile,
       targetFolder: activeTargetFolder,
+      description: description.trim() || undefined,
       onProgress: (info) => {
         setProgressInfo(info);
       },
@@ -319,6 +334,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
     setProgressInfo(null);
     setUploaderInstance(null);
     setUploadedVideo(null);
+    setDescription('');
     loadRecentUploads();
   };
 
@@ -363,6 +379,13 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
           <p className="text-sm text-slate-300 max-w-lg mx-auto mb-6">
             Your encrypted transfer link is ready to share. Anyone with this link can view or download the file.
           </p>
+
+          {uploadedVideo.description && (
+            <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 max-w-xl mx-auto mb-6 text-left">
+              <span className="text-xs text-slate-400 font-medium block mb-1">Description:</span>
+              <p className="text-sm text-slate-200">{uploadedVideo.description}</p>
+            </div>
+          )}
 
           {/* Share URL Box */}
           <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 max-w-xl mx-auto mb-8 text-left">
@@ -588,6 +611,24 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                 })()}
               </div>
 
+              {/* Build Description Input */}
+              <div>
+                <label htmlFor="build-description" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Description <span className="text-slate-500 font-normal">(optional, up to 90 characters)</span>
+                </label>
+                <textarea
+                  id="build-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value.slice(0, 90))}
+                  disabled={Boolean(progressInfo && progressInfo.status !== 'failed' && progressInfo.status !== 'cancelled')}
+                  placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
+                  rows={4}
+                  maxLength={90}
+                  className="w-full px-3.5 py-2.5 bg-[#090c13] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all resize-none disabled:opacity-50"
+                />
+                <p className="text-right text-[10px] text-slate-500 mt-1">{description.length}/90</p>
+              </div>
+
               {/* Progress State while uploading */}
               {progressInfo && (
                 <UploadProgress
@@ -696,6 +737,11 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                           {item.uploadType === 'PRIVATE' ? 'Private Storage' : 'Public Storage'}
                         </span>
                       </div>
+                      {item.description && (
+                        <p className="text-xs text-slate-400 mt-1 truncate max-w-md" title={item.description}>
+                          {item.description}
+                        </p>
+                      )}
                     </div>
                   </div>
 

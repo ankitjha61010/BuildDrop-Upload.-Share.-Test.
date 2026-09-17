@@ -44,6 +44,7 @@ interface AdminFileItem {
   buildNumber: string;
   appIcon?: string;
   uploadType?: 'NORMAL' | 'PRIVATE';
+  description?: string;
 }
 
 export const AdminListPage: React.FC = () => {
@@ -68,6 +69,7 @@ export const AdminListPage: React.FC = () => {
   const [editBundleId, setEditBundleId] = useState('');
   const [editVersion, setEditVersion] = useState('');
   const [editBuildNumber, setEditBuildNumber] = useState('');
+  const [editDescription, setEditDescription] = useState('');
   const [editUploadType, setEditUploadType] = useState<'NORMAL' | 'PRIVATE'>('NORMAL');
   const [editExpiryDays, setEditExpiryDays] = useState('12');
 
@@ -144,6 +146,7 @@ export const AdminListPage: React.FC = () => {
     setEditBundleId(file.bundleId);
     setEditVersion(file.bundleVersion || '1.0.0');
     setEditBuildNumber(file.buildNumber || '1');
+    setEditDescription(file.description || '');
 
     const isPriv = file.uploadType === 'PRIVATE' || file.folderName === 'Private_BuildDrop_Uploads';
     setEditUploadType(isPriv ? 'PRIVATE' : 'NORMAL');
@@ -241,6 +244,7 @@ export const AdminListPage: React.FC = () => {
           bundleId: editBundleId,
           bundleVersion: editVersion,
           buildNumber: editBuildNumber,
+          description: editDescription,
           uploadType: editUploadType,
           expiresAt: newExpiresAt,
           removeImage: removeImage,
@@ -482,6 +486,12 @@ export const AdminListPage: React.FC = () => {
                         <span>Build: <strong className="text-white">{file.buildNumber || '1'}</strong></span>
                         <span>Size: <strong className="text-white">{formatFileSize(file.size)}</strong></span>
                       </div>
+
+                      {file.description && (
+                        <p className="text-xs text-slate-400 truncate max-w-md" title={file.description}>
+                          {file.description}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -745,6 +755,20 @@ export const AdminListPage: React.FC = () => {
                     className="w-full px-3.5 py-2.5 bg-[#090c13] border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Description <span className="text-slate-500 font-normal">(optional, up to 90 characters)</span>
+                </label>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value.slice(0, 90))}
+                  placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
+                  rows={4}
+                  maxLength={90}
+                  className="w-full px-3.5 py-2.5 bg-[#090c13] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+                />
               </div>
 
               {editUploadType === 'NORMAL' && (

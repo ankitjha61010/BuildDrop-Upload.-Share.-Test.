@@ -32,6 +32,7 @@ export interface VideoMetadata {
   appIcon?: string;
   uploadType?: 'NORMAL' | 'PRIVATE';
   userId?: string;
+  description?: string;
 }
 
 export type UploadStatus = 
