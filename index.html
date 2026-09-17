@@ -11,18 +11,22 @@
          rewrites the title/description with the specific build's own name/description for share links.
          og-image.png is a square logo card on purpose: link-unfurlers (Slack, WhatsApp, etc.) that only show
          a small cropped thumbnail crop it square, and a non-square source image gets cut off/distorted in
-         that crop - a square source has nothing to crop away. -->
+         that crop - a square source has nothing to crop away.
+         The "?v=2" on the image URL is a cache-buster: Slack/WhatsApp/etc cache a fetched image by its exact
+         URL for a long time, separately from the page cache, so simply replacing og-image.png's bytes at the
+         same URL isn't enough to make already-seeded caches pick up the new file - bump this version number
+         any time og-image.png's content changes. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="BuildDrop" />
     <meta property="og:title" content="BuildDrop — Upload. Share. Test." />
     <meta property="og:description" content="Production-grade, frontend-only high-speed file uploading and sharing platform backed directly by Google Drive and Netlify." />
-    <meta property="og:image" content="https://builddrop.netlify.app/og-image.png" />
+    <meta property="og:image" content="https://builddrop.netlify.app/og-image.png?v=2" />
     <meta property="og:image:width" content="1080" />
     <meta property="og:image:height" content="1080" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="BuildDrop — Upload. Share. Test." />
     <meta name="twitter:description" content="Production-grade, frontend-only high-speed file uploading and sharing platform backed directly by Google Drive and Netlify." />
-    <meta name="twitter:image" content="https://builddrop.netlify.app/og-image.png" />
+    <meta name="twitter:image" content="https://builddrop.netlify.app/og-image.png?v=2" />
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

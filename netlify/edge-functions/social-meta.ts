@@ -81,7 +81,9 @@ export default async (request: Request, context: Context) => {
     let title = 'BuildDrop — Upload. Share. Test.';
     let description =
       'Production-grade, frontend-only high-speed file uploading and sharing platform backed directly by Google Drive and Netlify.';
-    const image = `${url.origin}/og-image.png`;
+    // "?v=2" cache-busts the crawler's own cached copy of this URL - keep this in sync with the
+    // version on the static og:image tags in index.html (see the comment there for why).
+    const image = `${url.origin}/og-image.png?v=2`;
 
     const accessToken = await getDriveAccessToken();
     const driveRes = await fetch(
