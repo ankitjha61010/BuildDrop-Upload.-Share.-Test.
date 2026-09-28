@@ -212,9 +212,9 @@ export const AdminListPage: React.FC = () => {
         });
 
         const newBuildMeta = await uploader.start();
-        
+
         // Delete old build file from Drive
-        await driveApi.consumeTemporaryDownload(editingFile.id).catch(() => {});
+        await driveApi.consumeTemporaryDownload(editingFile.id).catch(() => { });
         targetFileId = newBuildMeta.id;
       }
 
@@ -367,18 +367,16 @@ export const AdminListPage: React.FC = () => {
         <div className="flex items-center p-1.5 bg-[#0e121e] border border-slate-800 rounded-2xl w-full sm:w-auto overflow-x-auto">
           <button
             onClick={() => setActiveTab('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${activeTab === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+              }`}
           >
             All Files ({files.length})
           </button>
 
           <button
             onClick={() => setActiveTab('public')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'public' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'public' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+              }`}
           >
             <Folder className="w-3.5 h-3.5" />
             <span>BuildDrop_Uploads ({files.filter((f) => f.folderName.includes('BuildDrop_Uploads')).length})</span>
@@ -386,9 +384,8 @@ export const AdminListPage: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('private')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'private' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-            }`}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${activeTab === 'private' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
+              }`}
           >
             <FolderLock className="w-3.5 h-3.5 text-purple-300" />
             <span>Private_BuildDrop_Uploads ({files.filter((f) => f.folderName === 'Private_BuildDrop_Uploads' || f.uploadType === 'PRIVATE').length})</span>
@@ -624,7 +621,7 @@ export const AdminListPage: React.FC = () => {
               {/* App Image Management Section */}
               <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
                 <span className="text-xs font-semibold text-slate-300 block">App Icon / Image</span>
-                
+
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-2xl bg-indigo-950 border border-indigo-500/30 flex items-center justify-center shrink-0 relative overflow-hidden">
                     {imagePreviewUrl ? (
@@ -677,11 +674,10 @@ export const AdminListPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setEditUploadType('NORMAL')}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      editUploadType === 'NORMAL'
+                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${editUploadType === 'NORMAL'
                         ? 'bg-indigo-600 text-white border-indigo-500'
                         : 'bg-[#090c13] text-slate-400 border-slate-800'
-                    }`}
+                      }`}
                   >
                     NORMAL (12-Day Expiry)
                   </button>
@@ -689,11 +685,10 @@ export const AdminListPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setEditUploadType('PRIVATE')}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      editUploadType === 'PRIVATE'
+                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${editUploadType === 'PRIVATE'
                         ? 'bg-purple-600 text-white border-purple-500'
                         : 'bg-[#090c13] text-slate-400 border-slate-800'
-                    }`}
+                      }`}
                   >
                     PRIVATE (NEVER Expires)
                   </button>
@@ -763,7 +758,7 @@ export const AdminListPage: React.FC = () => {
                 </label>
                 <textarea
                   value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value.slice(0, 90))}
+                  onChange={(e) => setEditDescription(e.target.value.slice(0, 30000))}
                   placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
                   rows={4}
                   maxLength={90}

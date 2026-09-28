@@ -76,7 +76,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
           driveApi.removeCachedMetadata(item.id);
           setRecentUploads((prev) => prev.filter((i) => i.id !== item.id));
         }
-      } catch {}
+      } catch { }
     }
   };
 
@@ -220,7 +220,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                   appIconData = `data:image/png;base64,${base64}`;
                   break;
                 }
-              } catch {}
+              } catch { }
             }
           }
 
@@ -259,7 +259,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                       appIconData = `data:image/png;base64,${base64}`;
                       break;
                     }
-                  } catch {}
+                  } catch { }
                 }
               }
             }
@@ -436,11 +436,10 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
               onDragOver={handleDrag}
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${
-                dragActive
-                  ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]'
-                  : 'border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/40'
-              }`}
+              className={`glass-panel p-6 sm:p-8 rounded-3xl border-2 border-dashed text-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${dragActive
+                ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]'
+                : 'border-slate-700 hover:border-indigo-500/60 hover:bg-slate-800/40'
+                }`}
             >
               <input
                 ref={fileInputRef}
@@ -619,7 +618,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                 <textarea
                   id="build-description"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value.slice(0, 90))}
+                  onChange={(e) => setDescription(e.target.value.slice(0, 30000))}
                   disabled={Boolean(progressInfo && progressInfo.status !== 'failed' && progressInfo.status !== 'cancelled')}
                   placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
                   rows={4}
