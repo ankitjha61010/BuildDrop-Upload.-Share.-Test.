@@ -675,8 +675,8 @@ export const AdminListPage: React.FC = () => {
                     type="button"
                     onClick={() => setEditUploadType('NORMAL')}
                     className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${editUploadType === 'NORMAL'
-                        ? 'bg-indigo-600 text-white border-indigo-500'
-                        : 'bg-[#090c13] text-slate-400 border-slate-800'
+                      ? 'bg-indigo-600 text-white border-indigo-500'
+                      : 'bg-[#090c13] text-slate-400 border-slate-800'
                       }`}
                   >
                     NORMAL (12-Day Expiry)
@@ -686,8 +686,8 @@ export const AdminListPage: React.FC = () => {
                     type="button"
                     onClick={() => setEditUploadType('PRIVATE')}
                     className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${editUploadType === 'PRIVATE'
-                        ? 'bg-purple-600 text-white border-purple-500'
-                        : 'bg-[#090c13] text-slate-400 border-slate-800'
+                      ? 'bg-purple-600 text-white border-purple-500'
+                      : 'bg-[#090c13] text-slate-400 border-slate-800'
                       }`}
                   >
                     PRIVATE (NEVER Expires)
@@ -754,14 +754,14 @@ export const AdminListPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Description <span className="text-slate-500 font-normal">(optional, up to 90 characters)</span>
+                  Description <span className="text-slate-500 font-normal">(optional, up to 30000 characters)</span>
                 </label>
                 <textarea
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value.slice(0, 30000))}
                   placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
                   rows={4}
-                  maxLength={90}
+                  maxLength={30000}
                   className="w-full px-3.5 py-2.5 bg-[#090c13] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
                 />
               </div>

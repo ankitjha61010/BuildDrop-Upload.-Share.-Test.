@@ -613,7 +613,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
               {/* Build Description Input */}
               <div>
                 <label htmlFor="build-description" className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Description <span className="text-slate-500 font-normal">(optional, up to 90 characters)</span>
+                  Description <span className="text-slate-500 font-normal">(optional, up to 30000 characters)</span>
                 </label>
                 <textarea
                   id="build-description"
@@ -622,10 +622,10 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({ targetFolder, show
                   disabled={Boolean(progressInfo && progressInfo.status !== 'failed' && progressInfo.status !== 'cancelled')}
                   placeholder="Add a note about this file - what it is, what changed, or anything the recipient should know"
                   rows={4}
-                  maxLength={90}
+                  maxLength={30000}
                   className="w-full px-3.5 py-2.5 bg-[#090c13] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all resize-none disabled:opacity-50"
                 />
-                <p className="text-right text-[10px] text-slate-500 mt-1">{description.length}/90</p>
+                <p className="text-right text-[10px] text-slate-500 mt-1">{description.length}/30000</p>
               </div>
 
               {/* Progress State while uploading */}
